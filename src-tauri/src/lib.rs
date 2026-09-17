@@ -72,7 +72,9 @@ pub fn run() {
             app.manage(graph);
             app.manage(tools::Proposals::default());
             app.manage(tools::Activity::default());
-            let vault_root = app.path().document_dir()?.join("Professor OS");
+            // Linux systems without a desktop setup have no known Documents folder; use ~/Documents.
+            let documents = app.path().document_dir().or_else(|_| app.path().home_dir().map(|home| home.join("Documents")))?;
+            let vault_root = documents.join("Professor OS");
             app.manage(vault::Vault::new(vault_root));
             start_vault_sync(app.handle().clone());
             app.manage(claude::Claude::default());
