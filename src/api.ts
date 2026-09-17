@@ -38,6 +38,18 @@ export interface Affiliation {
   until: string | null;
 }
 
+/** How a detail is edited: "due" is a date with an optional time; "choice" allows only its options. */
+export type DetailInput = "text" | "email" | "url" | "due" | "datetime" | "choice";
+
+/** A detail a kind of page usually has. */
+export interface DetailField {
+  key: string;
+  label: string;
+  input: DetailInput;
+  /** Allowed values for "choice", suggestions otherwise. */
+  options: string[];
+}
+
 export interface EntityDetail {
   entity: Entity;
   links: Link[];
@@ -47,6 +59,8 @@ export interface EntityDetail {
   affiliations: Affiliation[];
   /** For a person whose affiliation is only text: the text, and the organization it names. */
   unlinked_affiliation: [string, Entity | null] | null;
+  /** The details this kind of page usually has, in order. */
+  fields: DetailField[];
 }
 
 export type EntityKind =
@@ -410,3 +424,7 @@ export const setSectionIcon = (tag: string, icon: string | null) => invoke<void>
 
 /** Stars a page, so it's listed under Favorites in the sidebar. */
 export const setFavorite = (id: string, favorite: boolean) => invoke<Entity>("set_favorite", { id, favorite });
+
+/** Edits a page's details: a string sets one, null removes it. */
+export const updateDetails = (id: string, changes: Record<string, string | null>) =>
+  invoke<Entity>("update_details", { id, changes });

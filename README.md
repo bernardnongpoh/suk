@@ -65,6 +65,8 @@ you choose and signs you in, in a couple of clicks.
   in the details.
 - **Pages for everything**: people (colleagues, collaborators, clients, students), projects
   (planned, in progress, completed), ideas, organizations and notes, each with an icon you pick.
+- **Edit anything directly**: click a detail on any page to change it, clear it to remove it, or
+  add one. You never have to go through chat, and the assistant is told what you changed.
 - **Today**: your tasks by when they're due, quick add, and "Plan my day", which drafts a
   schedule you confirm before anything reaches your calendar.
 - **Follow people's work**: new papers, homepage changes and blog or GitHub posts from people you

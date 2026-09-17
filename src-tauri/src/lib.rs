@@ -40,6 +40,12 @@ fn start_vault_sync(app: AppHandle) {
             Ok(report) => {
                 if !report.imported.is_empty() || !report.deleted.is_empty() {
                     eprintln!("vault: {report:?}");
+                    // The assistant may remember these pages as they were; have it look again.
+                    let changed: Vec<String> = report.imported.iter().chain(&report.deleted).cloned().collect();
+                    app.state::<assistant::Notes>().add(format!(
+                        "[App] These pages were changed in their Markdown files outside the app: {}. Look them up again rather than relying on earlier messages.",
+                        changed.join(", ")
+                    ));
                     let _ = app.emit("pages-changed", ());
                 }
             }
@@ -114,6 +120,7 @@ pub fn run() {
             commands::dismiss_section,
             commands::list_tagged,
             commands::submit_details,
+            commands::update_details,
             commands::skip_details,
             commands::fill_profile,
             commands::save_notes,

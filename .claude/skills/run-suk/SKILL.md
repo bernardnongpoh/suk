@@ -110,6 +110,11 @@ New menu, ⌘K commands, Today's quick add, and Settings > Appearance (theme and
 localStorage, applied as `data-theme` / `data-accent` on `<html>`). Headless Chrome draws emoji with
 a different font than the Mac app.
 
+Details (drive.mjs steps 43–47): every page's details are edited in place (`src/pages/Details.tsx`,
+field suggestions from `pages::detail_fields`, saved with `update_details`, which also tells the
+assistant). Edits made to the Markdown files outside the app are imported by the vault sync and
+reported to the assistant too.
+
 Following people (`watch.rs`): a background loop in `lib.rs` checks followed people (tag
 `following`) every minute. Each source is read at most every 6 hours; "Check now" forces a check.
 Relevance is judged by a one-shot `claude -p --json-schema` call (`claude::ask_json`). Updates show

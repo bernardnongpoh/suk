@@ -360,6 +360,96 @@ fn role_fields(role: &str) -> &'static [Field] {
     }
 }
 
+/// How a detail is edited on its page.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Input {
+    Text,
+    Email,
+    Url,
+    /// A date, or a date and time ("2026-09-18T11:00").
+    Due,
+    /// A date and time.
+    DateTime,
+    /// One of `options` only.
+    Choice,
+}
+
+/// A detail a page usually has, with how to edit it. Any other detail can be added by name.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DetailField {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub input: Input,
+    /// For Choice, the allowed values; otherwise suggestions.
+    pub options: &'static [&'static str],
+}
+
+const fn field(key: &'static str, label: &'static str, input: Input, options: &'static [&'static str]) -> DetailField {
+    DetailField { key, label, input, options }
+}
+
+/// The details each kind of page usually has, in the order they're offered.
+pub fn detail_fields(entity: &Entity) -> Vec<DetailField> {
+    use Input::*;
+    let mut fields: Vec<DetailField> = match entity.kind.as_str() {
+        "Person" => {
+            let mut fields = vec![
+                field("full_name", "Full name", Text, &[]),
+                field("email", "Email", Email, &[]),
+                field("phone", "Phone", Text, &[]),
+                field("position", "Position", Text, IDENTITY[2].options),
+                field("affiliation", "Affiliation", Text, &[]),
+                field("department", "Department", Text, &[]),
+            ];
+            if entity.tags.iter().any(|t| t == "student" || t == "alumni") {
+                fields.extend([
+                    field("program", "Programme", Text, &["PhD", "MTech", "MS", "BTech", "Intern"]),
+                    field("start", "Started", Text, &[]),
+                    field("thesis", "Thesis topic", Text, &[]),
+                    field("funding", "Funding", Text, &[]),
+                ]);
+            }
+            fields
+        }
+        "Task" => vec![
+            field("due", "Due", Due, &[]),
+            field("priority", "Priority", Choice, crate::graph::PRIORITIES),
+            field("status", "Status", Choice, &["open", "waiting", "done"]),
+            field("area", "Area", Text, &["research", "teaching", "students", "admin"]),
+            field("estimate", "Estimate", Text, &["30m", "1h", "2h", "half day"]),
+        ],
+        "Project" => vec![
+            field("funding", "Funding", Text, &[]),
+            field("start", "Started", Text, &[]),
+            field("end", "Ends", Text, &[]),
+            field("homepage", "Link", Url, &[]),
+        ],
+        "Course" => vec![
+            field("code", "Code", Text, &[]),
+            field("semester", "Semester", Text, &[]),
+            field("schedule", "Schedule", Text, &[]),
+            field("room", "Room", Text, &[]),
+        ],
+        "Organization" => vec![
+            field("type", "Type", Text, &["university", "department", "lab", "company", "funding agency"]),
+            field("city", "City", Text, &[]),
+            field("country", "Country", Text, &[]),
+            field("homepage", "Website", Url, &[]),
+        ],
+        "Event" => vec![
+            field("start", "Starts", DateTime, &[]),
+            field("end", "Ends", DateTime, &[]),
+            field("location", "Location", Text, &[]),
+        ],
+        "Document" => vec![field("url", "Link", Url, &[])],
+        _ => Vec::new(),
+    };
+    // A person's profile links are edited with Follow; a project's status in its header.
+    fields.retain(|f| !(entity.kind == "Project" && f.key == "status"));
+    fields
+}
+
 /// What to ask about a person: their connection to the user if unknown, and missing details.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct DetailsRequest {
@@ -417,6 +507,22 @@ pub fn details_requests(created: &[Entity]) -> Vec<DetailsRequest> {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn every_kind_of_page_offers_its_usual_details() {
+        let g = Graph::in_memory().unwrap();
+        let keys = |e: &Entity| detail_fields(e).iter().map(|f| f.key).collect::<Vec<_>>();
+        let person = g.upsert_entity("Person", "Kavya").unwrap();
+        assert!(keys(&person).contains(&"email") && !keys(&person).contains(&"thesis"));
+        let student = g.upsert_entity("Student", "Satya").unwrap();
+        assert!(keys(&student).contains(&"thesis"));
+        let task = g.upsert_entity("Task", "Review").unwrap();
+        let priority = detail_fields(&task).into_iter().find(|f| f.key == "priority").unwrap();
+        assert_eq!((priority.input, priority.options), (Input::Choice, crate::graph::PRIORITIES));
+        let project = g.upsert_entity("Project", "Fuzzing").unwrap();
+        assert!(!keys(&project).contains(&"status"), "status is in the header");
+        assert!(keys(&g.upsert_entity("Idea", "Grammar LLMs").unwrap()).is_empty());
+    }
 
     #[test]
     fn wikilinks_are_parsed() {

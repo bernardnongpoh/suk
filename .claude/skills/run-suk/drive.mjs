@@ -156,6 +156,14 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
       const role_fields = { student: miss([["program", "Programme"], ["start", "Started"], ["thesis", "Thesis topic"]]) };
       return !hasRole || fields.length ? { entity: e, roles: hasRole ? [] : roleOptions, fields, role_fields } : null;
     };
+    const f = (key, label, input = "text", options = []) => ({ key, label, input, options });
+    const fieldsFor = (e) => ({
+      Person: [f("full_name", "Full name"), f("email", "Email", "email"), f("phone", "Phone"), f("position", "Position"), f("affiliation", "Affiliation"), f("department", "Department"),
+        ...(e.tags.includes("student") ? [f("program", "Programme", "text", ["PhD", "MTech", "MS", "BTech"]), f("start", "Started"), f("thesis", "Thesis topic"), f("funding", "Funding")] : [])],
+      Task: [f("due", "Due", "due"), f("priority", "Priority", "choice", ["high", "medium", "low"]), f("status", "Status", "choice", ["open", "waiting", "done"]), f("area", "Area", "text", ["research", "teaching", "students", "admin"]), f("estimate", "Estimate")],
+      Project: [f("funding", "Funding"), f("start", "Started"), f("end", "Ends"), f("homepage", "Link", "url")],
+      Organization: [f("type", "Type"), f("city", "City"), f("country", "Country"), f("homepage", "Website", "url")],
+    })[e.kind] ?? [];
     const channels = {};
     // Assistant setup: pass ?setup=fresh to start with nothing installed.
     const fresh = location.search.includes("setup=fresh");
@@ -296,7 +304,15 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
               .map((l) => ({ person: db.entities[l.from], kind: l.kind, organization: db.entities[l.to], detail: l.detail ?? null, since: l.since ?? null, until: l.until ?? null }));
             const hasLink = db.links.some((l) => l.from === e.id && l.kind === "AFFILIATED_WITH");
             const unlinked = e.kind === "Person" && !hasLink && e.info.affiliation ? [e.info.affiliation, byName(e.info.affiliation) ?? null] : null;
-            return { entity: e, links, details: details(e), affiliations, unlinked_affiliation: unlinked };
+            return { entity: e, links, details: details(e), affiliations, unlinked_affiliation: unlinked, fields: fieldsFor(e) };
+          }
+          case "update_details": {
+            const e = db.entities[args.id];
+            for (const [key, value] of Object.entries(args.changes)) {
+              if (key === "due" && value && !/^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2})?$/.test(value)) throw new Error("due \\"" + value + "\\" must be YYYY-MM-DD or YYYY-MM-DDTHH:MM");
+              if (value == null) delete e.info[key]; else e.info[key] = value;
+            }
+            return e;
           }
           case "save_notes": db.entities[args.id].notes = args.notes; return db.entities[args.id];
           case "set_tags": db.entities[args.id].tags = args.tags.map((t) => t.toLowerCase()); return db.entities[args.id];
@@ -819,6 +835,80 @@ await click(".nav-item", "Settings");
 await sleep(300);
 await click(".segmented button", "System");
 await click(".swatch[aria-label=Indigo]");
+
+// Editing details in place: change, remove, add a suggested one and a custom one; a task's
+// priority and due date.
+await key("k", 4, "KeyK");
+await sleep(200);
+await type("satya");
+await sleep(400);
+await key("Enter");
+await sleep(800);
+results.detailsBefore = await texts(".details .prop");
+results.addDetailLinks = await texts(".details-actions .text-button");
+await click(".detail-edit", "example.edu");
+await sleep(200);
+await evaluate("(() => { const i = document.querySelector('.prop.editing input'); i.select(); })()");
+await type("satya.das@iitg.example");
+await key("Enter");
+await sleep(500);
+results.emailSaved = await evaluate("({ call: window.__invokes.filter(i => i.cmd === 'update_details').at(-1)?.args, row: [...document.querySelectorAll('.details .prop')].find(p => p.textContent.startsWith('Email'))?.textContent })");
+await shot("43-detail-saved");
+await evaluate("[...document.querySelectorAll('.details .prop')].find(p => p.textContent.startsWith('Started')).querySelector('.remove').click()");
+await sleep(500);
+results.afterRemove = await texts(".details .prop dt");
+await click(".details-actions .text-button", "Add detail");
+await sleep(200);
+results.addMenu = await texts(".details-actions .menu button");
+await shot("44-add-detail-menu");
+await click(".details-actions .menu button", "Thesis topic");
+await sleep(200);
+await type("Grammar-based fuzzing of compilers");
+await key("Enter");
+await sleep(500);
+await click(".details-actions .text-button", "Add detail");
+await sleep(200);
+await click(".details-actions .menu button", "Other");
+await sleep(200);
+await type("Office hours");
+await key("Enter");
+await sleep(200);
+await type("Tue 3–4 pm");
+await key("Enter");
+await sleep(500);
+results.afterAdds = await texts(".details .prop");
+results.detailCalls = await evaluate("window.__invokes.filter(i => i.cmd === 'update_details').map(i => i.args.changes)");
+await shot("45-details-added");
+
+await click(".nav-item", "Today");
+await sleep(500);
+await evaluate("[...document.querySelectorAll('.task-title')].find(t => t.textContent.includes('Read PLDI')).click()");
+await sleep(700);
+await click(".details-actions .text-button", "Add detail");
+await sleep(200);
+await click(".details-actions .menu button", "Priority");
+await sleep(300);
+await evaluate("(() => { const s = document.querySelector('.prop.editing select'); s.value = 'high'; s.dispatchEvent(new Event('change', { bubbles: true })); })()");
+await sleep(500);
+await click(".details-actions .text-button", "Add detail");
+await sleep(200);
+await click(".details-actions .menu button", "Due");
+await sleep(300);
+await evaluate(`(() => {
+  const input = document.querySelector('.prop.editing input[type=date]');
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  setter.call(input, '2026-09-30');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+})()`);
+await key("Enter");
+await sleep(500);
+results.taskDetails = await texts(".details .prop");
+results.taskCalls = await evaluate("window.__invokes.filter(i => i.cmd === 'update_details').slice(-2).map(i => i.args.changes)");
+await shot("46-task-details");
+await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }] });
+await sleep(300);
+await shot("47-task-details-dark");
+await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }] });
 
 results.setup = setupResults;
 results.consoleErrors = consoleErrors;

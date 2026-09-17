@@ -253,6 +253,8 @@ pub struct EntityDetail {
     affiliations: Vec<Affiliation>,
     /// For a person whose affiliation is only text: that text, and the organization it names.
     unlinked_affiliation: Option<(String, Option<Entity>)>,
+    /// The details this kind of page usually has, and how each is edited.
+    fields: Vec<pages::DetailField>,
 }
 
 #[tauri::command]
@@ -277,7 +279,8 @@ pub async fn get_entity(graph: State<'_, Graph>, id: String) -> Result<EntityDet
         },
         _ => None,
     };
-    Ok(EntityDetail { entity, links, details, affiliations, unlinked_affiliation })
+    let fields = pages::detail_fields(&entity);
+    Ok(EntityDetail { entity, links, details, affiliations, unlinked_affiliation, fields })
 }
 
 /// The main chat's recent messages, or with `focus`, the messages about that page.
@@ -447,6 +450,43 @@ pub async fn dismiss_section(graph: State<'_, Graph>, tag: String) -> Result<(),
 #[tauri::command]
 pub async fn list_tagged(graph: State<'_, Graph>, tag: String) -> Result<Vec<Entity>, String> {
     graph.entities_with_tag(&tag).map_err(text)
+}
+
+/// Changes a page's details from the page itself: a value sets a detail, None removes it. A
+/// person's affiliation becomes a link to the organization. Claude is told what changed, so it
+/// doesn't go on what an earlier message said.
+#[tauri::command]
+pub async fn update_details(app: AppHandle, id: String, changes: BTreeMap<String, Option<String>>) -> Result<Entity, String> {
+    let graph = app.state::<Graph>();
+    let before = graph.get(&id).map_err(text)?.ok_or("page not found")?;
+    let mut changes: BTreeMap<String, Option<String>> =
+        changes.into_iter().map(|(k, v)| (k, v.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()))).collect();
+    let affiliation = match before.kind.as_str() {
+        "Person" => changes.remove("affiliation").flatten(),
+        _ => None,
+    };
+    let mut entity = graph.update_info(&id, &changes).map_err(text)?;
+    if let Some(organization) = &affiliation {
+        let details = LinkDetails { detail: entity.info.get("position").cloned(), ..Default::default() };
+        graph.affiliate(&id, "AFFILIATED_WITH", organization, &details).map_err(text)?;
+        entity = graph.get(&id).map_err(text)?.ok_or("page not found")?;
+        changes.insert("affiliation".into(), Some(organization.clone()));
+    }
+    let described: Vec<String> = changes
+        .iter()
+        .map(|(key, value)| match value {
+            Some(value) => format!("{key}: {value}"),
+            None => format!("{key} removed"),
+        })
+        .collect();
+    if !described.is_empty() {
+        app.state::<Notes>().add(format!(
+            "[App] The user edited {}'s details on its page (already saved): {}.",
+            entity.name,
+            described.join("; ")
+        ));
+    }
+    Ok(entity)
 }
 
 /// Saves the details form; empty fields are left out.

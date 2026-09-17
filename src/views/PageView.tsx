@@ -8,7 +8,6 @@ import {
   getVault,
   openPageFile,
   openPage,
-  openUrl,
   renamePage,
   ROLES,
   setAliases,
@@ -24,11 +23,10 @@ import {
   PROFILE_LINKS,
 } from "../api";
 import ChatView from "../chat/ChatView";
-import { dueLabel, keyLabel } from "../format";
 import NotesEditor from "../notes/NotesEditor";
 import TaskList from "../tasks/TaskList";
 import FollowPanel from "../people/FollowPanel";
-import ProfileForm from "../people/ProfileForm";
+import Details from "../pages/Details";
 import type { ChatMessage } from "../types";
 import Avatar from "../ui/Avatar";
 import Icon from "../ui/Icon";
@@ -57,25 +55,7 @@ interface Props {
 }
 
 /** Details shown elsewhere on the page, or internal to the app. */
-const HIDDEN_INFO = ["details_skipped", "title", "full_name", "icon"];
-
-/** Icons and order for well-known details; others follow alphabetically. */
-const PROPS: Record<string, string> = {
-  email: "mail",
-  position: "briefcase",
-  affiliation: "building",
-  department: "building",
-  homepage: "globe",
-  program: "student",
-  start: "calendar",
-  thesis: "notes",
-  due: "calendar",
-  priority: "flag",
-  status: "check",
-  type: "building",
-  city: "globe",
-  country: "globe",
-};
+const HIDDEN_INFO = ["details_skipped", "title", "icon"];
 
 /** Section heading for a relationship, as seen from the page being viewed. */
 function section(link: Link): string {
@@ -110,8 +90,6 @@ function PageView({ id, version, onOpen, onBack, onChanged }: Props) {
   const [tagDraft, setTagDraft] = useState<string | null>(null);
   const [menu, setMenu] = useState<"page" | "role" | "assign" | "status" | "icon" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [hideProfile, setHideProfile] = useState(false);
-  const [showProfile, setShowProfile] = useState(false);
   const [aliasDraft, setAliasDraft] = useState<string | null>(null);
   // Assigning a task: the people to pick from, filtered by what's typed.
   const [people, setPeople] = useState<Entity[] | null>(null);
@@ -129,7 +107,7 @@ function PageView({ id, version, onOpen, onBack, onChanged }: Props) {
       </div>
     ) : null;
   }
-  const { entity, links, details, affiliations, unlinked_affiliation: unlinked } = detail;
+  const { entity, links, affiliations, unlinked_affiliation: unlinked, fields } = detail;
   const person = entity.kind === "Person";
 
   const changed = () => {
@@ -175,13 +153,11 @@ function PageView({ id, version, onOpen, onBack, onChanged }: Props) {
     const name = section(link);
     groups.set(name, [...(groups.get(name) ?? []), link]);
   }
-  const order = Object.keys(PROPS);
-  const rank = (k: string) => (order.includes(k) ? order.indexOf(k) : order.length);
-  const info = Object.entries(entity.info)
-    .filter(([k]) => !HIDDEN_INFO.includes(k) && !(person && (k === "affiliation" || PROFILE_LINKS.some((l) => l.key === k))))
-    // A project's status is chosen in the header.
-    .filter(([k]) => !(project && k === "status"))
-    .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b));
+  // Details edited elsewhere: a person's organizations and profile links, a project's status.
+  const hiddenDetail = (key: string) =>
+    HIDDEN_INFO.includes(key) ||
+    (person && (key === "affiliation" || PROFILE_LINKS.some((l) => l.key === key))) ||
+    (project && key === "status");
   const roles = rolesOf(entity);
   const fullName = entity.info.full_name && entity.info.full_name !== entity.name ? entity.info.full_name : null;
   // A project's status has its own control in the header.
@@ -501,80 +477,51 @@ function PageView({ id, version, onOpen, onBack, onChanged }: Props) {
           </div>
         </header>
 
-        {details && !hideProfile && (details.roles.length > 0 || showProfile) ? (
-          // Someone whose connection is unknown gets the whole form; known people a quiet link.
-          <ProfileForm
-            key={`${entity.id}-${entity.updated_at}`}
-            request={details}
-            place="page"
-            onChange={changed}
-            onClose={() => (showProfile ? setShowProfile(false) : setHideProfile(true))}
-          />
-        ) : (
-          details && (
-            <button className="text-button add-details" onClick={() => setShowProfile(true)}>
-              <Icon name="plus" size={13} />
-              Add {[...details.fields, ...roles.flatMap((r) => details.role_fields[r] ?? [])].map((f) => f.label.toLowerCase()).join(", ")}
-            </button>
-          )
-        )}
-
-        {(info.length > 0 || currentWork.length > 0 || unlinked) && (
-          <dl className="props">
-            {currentWork.length > 0 && (
-              <div className="prop">
-                <dt>
-                  <Icon name="building" size={14} />
-                  Affiliation
-                </dt>
-                <dd className="chips">
-                  {currentWork.map((l) => (
-                    <button key={l.other.id} className="task-chip org-chip" onClick={() => onOpen(l.other.id)}>
-                      <Avatar entity={l.other} size={16} />
-                      {l.other.name}
-                      {detailsText(l) && <span className="task-chip-label">{detailsText(l)}</span>}
+        <Details
+          entity={entity}
+          fields={fields}
+          hidden={hiddenDetail}
+          profileLink={person}
+          onSaved={changed}
+          before={
+            (currentWork.length > 0 || unlinked) && (
+            <>
+              {currentWork.length > 0 && (
+                <div className="prop">
+                  <dt>
+                    <Icon name="building" size={14} />
+                    Affiliation
+                  </dt>
+                  <dd className="chips">
+                    {currentWork.map((l) => (
+                      <button key={l.other.id} className="task-chip org-chip" onClick={() => onOpen(l.other.id)}>
+                        <Avatar entity={l.other} size={16} />
+                        {l.other.name}
+                        {detailsText(l) && <span className="task-chip-label">{detailsText(l)}</span>}
+                      </button>
+                    ))}
+                  </dd>
+                </div>
+              )}
+              {unlinked && (
+                <div className="prop">
+                  <dt>
+                    <Icon name="building" size={14} />
+                    Affiliation
+                  </dt>
+                  <dd className="unlinked">
+                    <span>{unlinked[0]}</span>
+                    <button className="button small" onClick={() => report(linkAffiliation(entity.id, unlinked[1]?.name ?? unlinked[0]).then(changed))}>
+                      <Icon name="link" size={12} />
+                      {unlinked[1] ? `Link to ${unlinked[1].name}` : "Make it a page"}
                     </button>
-                  ))}
-                </dd>
-              </div>
-            )}
-            {unlinked && (
-              <div className="prop">
-                <dt>
-                  <Icon name="building" size={14} />
-                  Affiliation
-                </dt>
-                <dd className="unlinked">
-                  <span>{unlinked[0]}</span>
-                  <button className="button small" onClick={() => report(linkAffiliation(entity.id, unlinked[1]?.name ?? unlinked[0]).then(changed))}>
-                    <Icon name="link" size={12} />
-                    {unlinked[1] ? `Link to ${unlinked[1].name}` : "Make it a page"}
-                  </button>
-                </dd>
-              </div>
-            )}
-            {info.map(([key, value]) => (
-              <div key={key} className="prop">
-                <dt>
-                  <Icon name={PROPS[key] ?? "hash"} size={14} />
-                  {keyLabel(key)}
-                </dt>
-                <dd>
-                  {key === "homepage" && /^https?:\/\//.test(value) ? (
-                    <button className="text-button" onClick={() => report(openUrl(value))}>
-                      {value.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
-                      <Icon name="external" size={12} />
-                    </button>
-                  ) : key === "due" ? (
-                    `${dueLabel(value)} (${value})`
-                  ) : (
-                    value
-                  )}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
+                  </dd>
+                </div>
+              )}
+            </>
+            )
+          }
+        />
 
         {person && <FollowPanel person={entity} version={version} onOpen={onOpen} onChanged={changed} />}
 

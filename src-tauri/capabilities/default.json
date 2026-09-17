@@ -21,6 +21,7 @@
     "allow-dismiss-section",
     "allow-list-tagged",
     "allow-submit-details",
+    "allow-update-details",
     "allow-skip-details",
     "allow-fill-profile",
     "allow-save-notes",

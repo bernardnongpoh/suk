@@ -18,6 +18,7 @@ fn main() {
             "dismiss_section",
             "list_tagged",
             "submit_details",
+            "update_details",
             "skip_details",
             "fill_profile",
             "save_notes",

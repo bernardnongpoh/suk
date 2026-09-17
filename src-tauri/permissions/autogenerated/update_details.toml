@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-details"
+description = "Enables the update_details command without any pre-configured scope."
+commands.allow = ["update_details"]
+
+[[permission]]
+identifier = "deny-update-details"
+description = "Denies the update_details command without any pre-configured scope."
+commands.deny = ["update_details"]

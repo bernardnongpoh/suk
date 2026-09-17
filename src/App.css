@@ -3547,3 +3547,117 @@ button.page-icon:hover {
   font-size: 13px;
   color: var(--text-2);
 }
+
+/* Editable details */
+
+.details {
+  margin-bottom: 8px;
+}
+
+.prop dd {
+  flex: 1;
+}
+
+.detail-value {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 100%;
+}
+
+.detail-edit {
+  margin: -2px -6px;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+
+.detail-edit:hover {
+  background: var(--hover);
+}
+
+.icon-button.tiny {
+  width: 22px;
+  height: 22px;
+  margin-left: 4px;
+  color: var(--muted);
+}
+
+.prop .icon-button.remove {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.prop:hover .icon-button.remove,
+.prop .icon-button.remove:focus-visible {
+  opacity: 1;
+}
+
+.detail-input {
+  width: 100%;
+  max-width: 320px;
+  height: 28px;
+  margin: -3px 0;
+  padding: 0 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--mark);
+  outline: none;
+  font-size: 14px;
+}
+
+.detail-due {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.detail-due .detail-input {
+  width: auto;
+}
+
+.detail-due .detail-input.time {
+  max-width: 120px;
+}
+
+.detail-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--success);
+  animation: fade 0.15s ease-out;
+}
+
+.details-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 6px 2px 14px;
+  font-size: 13px;
+}
+
+.details-actions .text-button {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.details-actions .text-button:hover {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+.details-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 260px;
+}
