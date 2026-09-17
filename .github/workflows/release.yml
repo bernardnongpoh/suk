@@ -45,8 +45,6 @@ jobs:
         if: steps.version.outputs.skip == 'false'
         run: |
           tag="v${{ steps.version.outputs.version }}"
-          # A draft left by an earlier failed run is replaced, so no stale files remain.
-          gh release delete "$tag" --yes 2>/dev/null || true
           cat > notes.md <<NOTES
           Install on macOS or Linux:
 
@@ -54,8 +52,12 @@ jobs:
 
           Or download the file for your computer below. On macOS, the app isn't signed yet: if you open the .dmg download, right-click the app and choose Open the first time.
           NOTES
-          gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Suk $tag" --notes-file notes.md
-          id="$(gh api "repos/${{ github.repository }}/releases" --jq ".[] | select(.tag_name == \"$tag\") | .id" | head -1)"
+          # Created through the API so its id comes back: drafts don't show up in release lists
+          # for this workflow's token, so the id can't be looked up afterwards.
+          id="$(gh api "repos/${{ github.repository }}/releases" \
+            -f tag_name="$tag" -f target_commitish="$GITHUB_SHA" -f name="Suk $tag" \
+            -F body=@notes.md -F draft=true --jq .id)"
+          test -n "$id"
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
   build:
@@ -130,4 +132,12 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Publish
-        run: gh release edit "v${{ needs.prepare.outputs.version }}" --repo "${{ github.repository }}" --draft=false --latest
+        run: |
+          id="${{ needs.prepare.outputs.release_id }}"
+          files="$(gh api "repos/${{ github.repository }}/releases/$id/assets" --paginate --jq '.[].name')"
+          echo "$files"
+          # Two macOS disk images, and a .deb, .rpm and AppImage for each Linux architecture.
+          for pattern in '_aarch64\.dmg$' '_x64\.dmg$' '_amd64\.deb$' '_arm64\.deb$' '\.x86_64\.rpm$' '\.aarch64\.rpm$' '_amd64\.AppImage$' '_aarch64\.AppImage$'; do
+            echo "$files" | grep -Eq "$pattern" || { echo "::error::Missing an installer matching $pattern; not publishing"; exit 1; }
+          done
+          gh api -X PATCH "repos/${{ github.repository }}/releases/$id" -F draft=false -f make_latest=true --jq .html_url
