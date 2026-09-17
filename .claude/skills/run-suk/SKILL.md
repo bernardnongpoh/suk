@@ -142,9 +142,11 @@ status (`needs-auth` means not connected).
   `otool -L` on `Contents/MacOS/suk` must show no `/opt/homebrew` paths. Smoke test with
   `env -i HOME=<empty dir> PATH=/usr/bin:/bin "<app>/Contents/MacOS/suk"`: it prints
   `mcp: tools…` and stays running.
-- Releases: push a `v*` tag; `.github/workflows/release.yml` builds macOS arm64/x64 and Linux
-  x86_64/arm64 into a draft release. Test Linux packages in Docker (`ubuntu:24.04`) before
-  publishing. `git push` may pick up another account's credentials; use
+- Releases: work on `dev`; merging into `main` runs `.github/workflows/release.yml`, which releases
+  the version in `tauri.conf.json` (skipped if already released; bump with
+  `scripts/bump-version.sh`). It creates a draft, builds macOS arm64/x64 and Linux x86_64/arm64 into
+  it, then publishes. Test Linux packages in Docker (`ubuntu:24.04`, `/private/tmp/.../linux-smoke.sh`
+  pattern: install the .deb, run under `xvfb-run`, check it stays up). `git push` may pick up another account's credentials; use
   `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push`.
 
 ## 3. Clean up
