@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-history"
+description = "Enables the chat_history command without any pre-configured scope."
+commands.allow = ["chat_history"]
+
+[[permission]]
+identifier = "deny-chat-history"
+description = "Denies the chat_history command without any pre-configured scope."
+commands.deny = ["chat_history"]

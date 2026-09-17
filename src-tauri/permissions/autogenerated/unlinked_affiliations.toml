@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-unlinked-affiliations"
+description = "Enables the unlinked_affiliations command without any pre-configured scope."
+commands.allow = ["unlinked_affiliations"]
+
+[[permission]]
+identifier = "deny-unlinked-affiliations"
+description = "Denies the unlinked_affiliations command without any pre-configured scope."
+commands.deny = ["unlinked_affiliations"]

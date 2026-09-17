@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-tagged"
+description = "Enables the list_tagged command without any pre-configured scope."
+commands.allow = ["list_tagged"]
+
+[[permission]]
+identifier = "deny-list-tagged"
+description = "Denies the list_tagged command without any pre-configured scope."
+commands.deny = ["list_tagged"]

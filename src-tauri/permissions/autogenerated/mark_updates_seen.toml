@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mark-updates-seen"
+description = "Enables the mark_updates_seen command without any pre-configured scope."
+commands.allow = ["mark_updates_seen"]
+
+[[permission]]
+identifier = "deny-mark-updates-seen"
+description = "Denies the mark_updates_seen command without any pre-configured scope."
+commands.deny = ["mark_updates_seen"]

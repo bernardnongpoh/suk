@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-choose-assistant"
+description = "Enables the choose_assistant command without any pre-configured scope."
+commands.allow = ["choose_assistant"]
+
+[[permission]]
+identifier = "deny-choose-assistant"
+description = "Denies the choose_assistant command without any pre-configured scope."
+commands.deny = ["choose_assistant"]

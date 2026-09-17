@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pin-section"
+description = "Enables the pin_section command without any pre-configured scope."
+commands.allow = ["pin_section"]
+
+[[permission]]
+identifier = "deny-pin-section"
+description = "Denies the pin_section command without any pre-configured scope."
+commands.deny = ["pin_section"]

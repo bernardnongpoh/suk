@@ -1,0 +1,5 @@
+[env]
+# The embedded database downloads a prebuilt library: pin it to the crate's version, and on Linux
+# use the build that runs on older CPUs.
+LBUG_VERSION = "0.20.4"
+LBUG_LINUX_VARIANT = "compat"

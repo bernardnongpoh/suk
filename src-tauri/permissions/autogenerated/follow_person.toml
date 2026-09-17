@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-follow-person"
+description = "Enables the follow_person command without any pre-configured scope."
+commands.allow = ["follow_person"]
+
+[[permission]]
+identifier = "deny-follow-person"
+description = "Denies the follow_person command without any pre-configured scope."
+commands.deny = ["follow_person"]

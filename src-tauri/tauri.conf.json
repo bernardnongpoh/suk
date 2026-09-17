@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Professor OS",
+  "version": "0.1.0",
+  "identifier": "com.professoros.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Professor OS",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 640,
+        "minHeight": 480
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg",
+      "deb",
+      "rpm",
+      "appimage"
+    ],
+    "category": "Productivity",
+    "shortDescription": "A calm place for a professor's students, research, teaching and admin.",
+    "longDescription": "Professor OS keeps track of your students, collaborators, projects, courses and tasks. Tell it what's going on in plain words; it organizes everything into pages, plans your day and follows researchers you care about. It runs on your computer and works through Claude Code or Codex.",
+    "copyright": "© 2026 Bernard Nongpoh",
+    "homepage": "https://github.com/bernardnongpoh/professor-os",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.3"
+    },
+    "linux": {
+      "deb": {
+        "section": "utils"
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  }
+}

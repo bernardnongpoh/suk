@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-check-person-now"
+description = "Enables the check_person_now command without any pre-configured scope."
+commands.allow = ["check_person_now"]
+
+[[permission]]
+identifier = "deny-check-person-now"
+description = "Denies the check_person_now command without any pre-configured scope."
+commands.deny = ["check_person_now"]

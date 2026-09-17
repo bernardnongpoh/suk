@@ -1,0 +1,236 @@
+{
+ "results": [
+  {
+   "id": "https://openalex.org/W7208768283",
+   "title": "Neural Program Modeling Learning Program-Specific Models that Predict Execution Features from Input Features and vice versa",
+   "publication_date": "2026-09-04",
+   "primary_location": {
+    "id": "doi:10.1145/3845620",
+    "is_oa": false,
+    "landing_page_url": "https://doi.org/10.1145/3845620",
+    "pdf_url": null,
+    "source": {
+     "display_name": "ACM Transactions on Software Engineering and Methodology",
+     "type": "journal"
+    },
+    "license": null,
+    "license_id": null,
+    "version": "publishedVersion",
+    "is_accepted": true,
+    "is_published": true,
+    "raw_source_name": "ACM Transactions on Software Engineering and Methodology",
+    "raw_type": "journal-article"
+   },
+   "abstract_inverted_index": {
+    "Understanding": [
+     0
+    ],
+    "the": [
+     1
+    ],
+    "semantics": [
+     2
+    ],
+    "of": [
+     3
+    ],
+    "program": [
+     4
+    ],
+    "code": [
+     5
+    ],
+    "is": [
+     6
+    ],
+    "a": [
+     7
+    ],
+    "fundamental": [
+     8
+    ],
+    "problem": [
+     9
+    ],
+    "in": [
+     10
+    ],
+    "software": [
+     11
+    ],
+    "engineering,": [
+     12
+    ],
+    "posing": [
+     13
+    ],
+    "continuous": [
+     14
+    ],
+    "challenges": [
+     15
+    ],
+    "for": [
+     16,
+     23
+    ],
+    "testing": [
+     17
+    ],
+    "and": [
+     18
+    ],
+    "analysis,": [
+     19
+    ],
+    "as": [
+     20,
+     22
+    ],
+    "well": [
+     21
+    ],
+    "AI": [
+     24
+    ]
+   },
+   "doi": "https://doi.org/10.1145/3845620",
+   "authorships": [
+    {
+     "author_position": "first",
+     "author": {
+      "id": "https://openalex.org/A5039443879",
+      "display_name": "Tural Mammadov",
+      "orcid": "https://orcid.org/0009-0007-8466-3694"
+     },
+     "institutions": [
+      {
+       "id": "https://openalex.org/I4210128801",
+       "display_name": "Helmholtz Center for Information Security",
+       "ror": "https://ror.org/02njgxr09",
+       "country_code": "DE",
+       "type": "facility",
+       "lineage": [
+        "https://openalex.org/I1305996414",
+        "https://openalex.org/I4210128801"
+       ]
+      }
+     ],
+     "countries": [
+      "DE"
+     ],
+     "is_corresponding": false,
+     "raw_author_name": "Tural Mammadov",
+     "raw_orcid": "https://orcid.org/0009-0007-8466-3694"
+    },
+    {
+     "author_position": "middle",
+     "author": {
+      "id": "https://openalex.org/A5037128220",
+      "display_name": "Marius Smytzek",
+      "orcid": "https://orcid.org/0000-0002-4899-9031"
+     },
+     "institutions": [
+      {
+       "id": "https://openalex.org/I4210128801",
+       "display_name": "Helmholtz Center for Information Security",
+       "ror": "https://ror.org/02njgxr09",
+       "country_code": "DE",
+       "type": "facility",
+       "lineage": [
+        "https://openalex.org/I1305996414",
+        "https://openalex.org/I4210128801"
+       ]
+      }
+     ],
+     "countries": [
+      "DE"
+     ],
+     "is_corresponding": false,
+     "raw_author_name": "Marius Smytzek",
+     "raw_orcid": "https://orcid.org/0000-0002-4899-9031"
+    }
+   ]
+  },
+  {
+   "id": "https://openalex.org/W7167806132",
+   "title": "Search-Based Generation of Complex Inputs with FANDANGO",
+   "publication_date": "2026-07-09",
+   "primary_location": {
+    "id": "doi:10.1007/978-3-032-30699-9_15",
+    "is_oa": false,
+    "landing_page_url": "https://doi.org/10.1007/978-3-032-30699-9_15",
+    "pdf_url": null,
+    "source": {
+     "display_name": "Lecture notes in computer science",
+     "type": "book series"
+    },
+    "license": null,
+    "license_id": null,
+    "version": "publishedVersion",
+    "is_accepted": true,
+    "is_published": true,
+    "raw_source_name": "Lecture Notes in Computer Science",
+    "raw_type": "book-chapter"
+   },
+   "abstract_inverted_index": {},
+   "doi": "https://doi.org/10.1007/978-3-032-30699-9_15",
+   "authorships": [
+    {
+     "author_position": "first",
+     "author": {
+      "id": "https://openalex.org/A5140353982",
+      "display_name": "Jos\u00e9 Antonio Zamudio Amaya",
+      "orcid": null
+     },
+     "institutions": [
+      {
+       "id": "https://openalex.org/I4210128801",
+       "display_name": "Helmholtz Center for Information Security",
+       "ror": "https://ror.org/02njgxr09",
+       "country_code": "DE",
+       "type": "facility",
+       "lineage": [
+        "https://openalex.org/I1305996414",
+        "https://openalex.org/I4210128801"
+       ]
+      }
+     ],
+     "countries": [
+      "DE"
+     ],
+     "is_corresponding": true,
+     "raw_author_name": "Jos\u00e9 Antonio Zamudio Amaya",
+     "raw_orcid": null
+    },
+    {
+     "author_position": "middle",
+     "author": {
+      "id": "https://openalex.org/A5037128220",
+      "display_name": "Marius Smytzek",
+      "orcid": "https://orcid.org/0000-0002-4899-9031"
+     },
+     "institutions": [
+      {
+       "id": "https://openalex.org/I4210128801",
+       "display_name": "Helmholtz Center for Information Security",
+       "ror": "https://ror.org/02njgxr09",
+       "country_code": "DE",
+       "type": "facility",
+       "lineage": [
+        "https://openalex.org/I1305996414",
+        "https://openalex.org/I4210128801"
+       ]
+      }
+     ],
+     "countries": [
+      "DE"
+     ],
+     "is_corresponding": false,
+     "raw_author_name": "Marius Smytzek",
+     "raw_orcid": null
+    }
+   ]
+  }
+ ]
+}

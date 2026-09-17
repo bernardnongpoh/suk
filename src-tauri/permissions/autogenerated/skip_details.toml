@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-skip-details"
+description = "Enables the skip_details command without any pre-configured scope."
+commands.allow = ["skip_details"]
+
+[[permission]]
+identifier = "deny-skip-details"
+description = "Denies the skip_details command without any pre-configured scope."
+commands.deny = ["skip_details"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fill-profile"
+description = "Enables the fill_profile command without any pre-configured scope."
+commands.allow = ["fill_profile"]
+
+[[permission]]
+identifier = "deny-fill-profile"
+description = "Denies the fill_profile command without any pre-configured scope."
+commands.deny = ["fill_profile"]

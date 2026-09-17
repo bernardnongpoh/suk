@@ -1,0 +1,56 @@
+{
+ "results": [
+  {
+   "id": "https://openalex.org/A5051672229",
+   "display_name": "Andreas Zeller",
+   "works_count": 432,
+   "last_known_institutions": [
+    {
+     "display_name": "Helmholtz Center for Information Security",
+     "country_code": "DE"
+    },
+    {
+     "display_name": "National Research Center for Applied Cybersecurity ATHENE",
+     "country_code": "DE"
+    },
+    {
+     "display_name": "Saarland University",
+     "country_code": "DE"
+    }
+   ],
+   "orcid": "https://orcid.org/0000-0003-4719-8803"
+  },
+  {
+   "id": "https://openalex.org/A5103031365",
+   "display_name": "Andreas Zeller",
+   "works_count": 250,
+   "last_known_institutions": [
+    {
+     "display_name": "Roche (Switzerland)",
+     "country_code": "CH"
+    },
+    {
+     "display_name": "University of Basel",
+     "country_code": "CH"
+    },
+    {
+     "display_name": "Federal Office of Public Health",
+     "country_code": "CH"
+    }
+   ],
+   "orcid": "https://orcid.org/0000-0002-6170-8745"
+  },
+  {
+   "id": "https://openalex.org/A5070283755",
+   "display_name": "Andreas Zeller",
+   "works_count": 46,
+   "last_known_institutions": [
+    {
+     "display_name": "Roche (Switzerland)",
+     "country_code": "CH"
+    }
+   ],
+   "orcid": "https://orcid.org/0000-0002-3565-6347"
+  }
+ ]
+}

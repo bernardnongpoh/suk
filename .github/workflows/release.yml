@@ -1,0 +1,83 @@
+# Builds the installers for macOS and Linux when a version tag (v0.1.0) is pushed, and attaches
+# them to a draft GitHub release. Publish the release once every file is there.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple silicon)
+            runner: macos-14
+          - name: macOS (Intel)
+            runner: macos-15-intel
+          - name: Linux (x86_64)
+            runner: ubuntu-22.04
+          - name: Linux (ARM64)
+            runner: ubuntu-22.04-arm
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libssl-dev build-essential cmake file xdg-utils rpm
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.runner }}
+
+      - run: npm ci
+
+      # The database links OpenSSL; on macOS link a static copy so the app doesn't need Homebrew's.
+      - name: Static OpenSSL (macOS)
+        if: runner.os == 'macOS'
+        run: echo "OPENSSL_DIR=$(scripts/static-openssl.sh "$RUNNER_TEMP/openssl-static")" >> "$GITHUB_ENV"
+
+      - name: Build and upload installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Professor OS ${{ github.ref_name }}
+          releaseBody: |
+            Install on macOS or Linux:
+
+                curl -fsSL https://raw.githubusercontent.com/bernardnongpoh/professor-os/main/install.sh | sh
+
+            Or download the file for your computer below. On macOS, the app isn't signed yet: if you open the .dmg download, right-click the app and choose Open the first time.
+          releaseDraft: true
+          prerelease: false
+
+      - name: Check the macOS app doesn't depend on Homebrew
+        if: runner.os == 'macOS'
+        run: |
+          binary="$(find src-tauri/target/release/bundle/macos -name professor-os -path '*Contents/MacOS*' | head -1)"
+          otool -L "$binary"
+          if otool -L "$binary" | grep -E '/opt/homebrew|/usr/local/(opt|Cellar)'; then
+            echo "The app links a library from Homebrew" >&2
+            exit 1
+          fi

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rename-page"
+description = "Enables the rename_page command without any pre-configured scope."
+commands.allow = ["rename_page"]
+
+[[permission]]
+identifier = "deny-rename-page"
+description = "Denies the rename_page command without any pre-configured scope."
+commands.deny = ["rename_page"]

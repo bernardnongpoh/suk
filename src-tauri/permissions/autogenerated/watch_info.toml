@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-watch-info"
+description = "Enables the watch_info command without any pre-configured scope."
+commands.allow = ["watch_info"]
+
+[[permission]]
+identifier = "deny-watch-info"
+description = "Denies the watch_info command without any pre-configured scope."
+commands.deny = ["watch_info"]

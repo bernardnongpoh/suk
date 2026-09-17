@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-install-assistant"
+description = "Enables the install_assistant command without any pre-configured scope."
+commands.allow = ["install_assistant"]
+
+[[permission]]
+identifier = "deny-install-assistant"
+description = "Denies the install_assistant command without any pre-configured scope."
+commands.deny = ["install_assistant"]

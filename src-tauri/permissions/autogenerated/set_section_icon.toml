@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-section-icon"
+description = "Enables the set_section_icon command without any pre-configured scope."
+commands.allow = ["set_section_icon"]
+
+[[permission]]
+identifier = "deny-set-section-icon"
+description = "Denies the set_section_icon command without any pre-configured scope."
+commands.deny = ["set_section_icon"]

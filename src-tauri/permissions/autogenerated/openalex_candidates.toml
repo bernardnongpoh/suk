@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-openalex-candidates"
+description = "Enables the openalex_candidates command without any pre-configured scope."
+commands.allow = ["openalex_candidates"]
+
+[[permission]]
+identifier = "deny-openalex-candidates"
+description = "Denies the openalex_candidates command without any pre-configured scope."
+commands.deny = ["openalex_candidates"]
