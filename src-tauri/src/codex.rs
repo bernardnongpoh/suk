@@ -25,7 +25,7 @@ const ONE_SHOT_TIMEOUT: Duration = Duration::from_secs(180);
 /// Where the thread id is kept, so the conversation continues after the app restarts.
 const THREAD_FILE: &str = "thread-id";
 /// The environment variable Codex reads the app's MCP token from.
-const TOKEN_VARIABLE: &str = "PROFESSOR_OS_MCP_TOKEN";
+const TOKEN_VARIABLE: &str = "SUK_MCP_TOKEN";
 /// Codex tools that have nothing to do with this app.
 const DISABLED_FEATURES: &[&str] = &[
     "shell_tool",
@@ -293,7 +293,7 @@ mod tests {
     fn setup() -> Setup {
         Setup {
             binary: "codex".into(),
-            workdir: "/tmp/professor-os-codex".into(),
+            workdir: "/tmp/suk-codex".into(),
             mcp: Endpoint { url: "http://127.0.0.1:4000/mcp".into(), token: "secret".into() },
         }
     }
@@ -307,13 +307,13 @@ mod tests {
         for expected in ["--json", "--sandbox read-only", "--ignore-user-config", "approval_policy=\"never\"", "--disable shell_tool", "--disable browser_use"] {
             assert!(joined.contains(expected), "{expected}");
         }
-        assert!(joined.contains("mcp_servers.professor.url=\"http://127.0.0.1:4000/mcp\""));
-        assert!(joined.contains("mcp_servers.professor.bearer_token_env_var=\"PROFESSOR_OS_MCP_TOKEN\""));
+        assert!(joined.contains("mcp_servers.suk.url=\"http://127.0.0.1:4000/mcp\""));
+        assert!(joined.contains("mcp_servers.suk.bearer_token_env_var=\"SUK_MCP_TOKEN\""));
         // The token itself never appears on the command line.
         assert!(!joined.contains("secret"));
         let instructions = args.iter().find(|a| a.starts_with("developer_instructions=")).unwrap();
         let prompt: String = serde_json::from_str(&instructions["developer_instructions=".len()..]).unwrap();
-        assert!(prompt.starts_with("You are the assistant inside Professor OS") && prompt.contains("no Google Calendar tools"));
+        assert!(prompt.starts_with("You are the assistant inside Suk") && prompt.contains("no Google Calendar tools"));
         assert!(!joined.contains(" resume "));
 
         let resumed = arguments(&setup(), Some("01a0af2b-a5f9"));
@@ -329,8 +329,8 @@ mod tests {
     #[ignore]
     fn real_codex_accepts_the_app_arguments() {
         let binary = std::env::var("CODEX_BIN").expect("set CODEX_BIN");
-        let home = std::env::temp_dir().join(format!("professor-os-codex-home-{}", std::process::id()));
-        let workdir = std::env::temp_dir().join(format!("professor-os-codex-work-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("suk-codex-home-{}", std::process::id()));
+        let workdir = std::env::temp_dir().join(format!("suk-codex-work-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&workdir).unwrap();
         // A stand-in MCP server that records the Authorization header Codex sends.
@@ -385,8 +385,8 @@ mod tests {
             r#"{"type":"thread.started","thread_id":"01a0af2b-a5f9-7bf2-aad8-383a88299a5e"}"#,
             r#"{"type":"turn.started"}"#,
             "2026-09-17T11:41:09Z ERROR not json",
-            r#"{"type":"item.started","item":{"id":"1","type":"mcp_tool_call","server":"professor","tool":"save","arguments":{},"status":"in_progress"}}"#,
-            r#"{"type":"item.completed","item":{"id":"1","type":"mcp_tool_call","server":"professor","tool":"save","status":"completed"}}"#,
+            r#"{"type":"item.started","item":{"id":"1","type":"mcp_tool_call","server":"suk","tool":"save","arguments":{},"status":"in_progress"}}"#,
+            r#"{"type":"item.completed","item":{"id":"1","type":"mcp_tool_call","server":"suk","tool":"save","status":"completed"}}"#,
             r#"{"type":"item.completed","item":{"id":"2","type":"agent_message","text":"Saved Amit as your PhD student."}}"#,
             r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}"#,
         ];

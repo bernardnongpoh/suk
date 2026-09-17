@@ -10,7 +10,7 @@ interface Props {
 }
 
 /**
- * What people the professor follows have published or changed. Relevant shows what Claude judged
+ * What people the user follows have published or changed. Relevant shows what Claude judged
  * related to their research areas, projects and ideas; Everything shows all new items.
  */
 function UpdatesView({ version, onOpen }: Props) {

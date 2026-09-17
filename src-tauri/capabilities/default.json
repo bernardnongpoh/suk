@@ -29,7 +29,7 @@
     "allow-rename-page",
     "allow-delete-page",
     "allow-get-vault",
-    "allow-open-in-obsidian",
+    "allow-open-page-file",
     "allow-open-url",
     "allow-assistant-status",
     "allow-choose-assistant",

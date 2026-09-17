@@ -110,7 +110,7 @@ async fn handle<B: Backend>(
             json!({
                 "protocolVersion": params["protocolVersion"].as_str().unwrap_or(PROTOCOL_VERSION),
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "professor-os", "version": env!("CARGO_PKG_VERSION") }
+                "serverInfo": { "name": "suk", "version": env!("CARGO_PKG_VERSION") }
             }),
         ),
         "ping" => result(id, json!({})),

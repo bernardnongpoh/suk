@@ -51,7 +51,7 @@ fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Shown when chat can't run because no assistant is set up.
-const INSTALL_HELP: &str = "Open Settings to set up Claude Code or Codex; Professor OS can't answer without one.";
+const INSTALL_HELP: &str = "Open Settings to set up Claude Code or Codex; Suk can't answer without one.";
 
 /// The assistant chosen when setting up the app, if any.
 fn chosen(app: &AppHandle) -> Option<Kind> {
@@ -219,7 +219,7 @@ fn confirmation_message(proposal: &Proposal) -> String {
         }
     }
     let mut message = format!(
-        "[App] The professor confirmed proposal {}. Add these to their Google Calendar now, with exactly these titles and local times:\n{}",
+        "[App] The user confirmed proposal {}. Add these to their Google Calendar now, with exactly these titles and local times:\n{}",
         proposal.id,
         confirmed.join("\n")
     );
@@ -234,7 +234,7 @@ fn confirmation_message(proposal: &Proposal) -> String {
 pub async fn dismiss_proposal(app: AppHandle, id: String) -> Result<Proposal, String> {
     let proposal = app.state::<Proposals>().dismiss(&id)?;
     app.state::<Notes>()
-        .add(format!("[App] The professor dismissed proposal {id} (\"Not now\")."));
+        .add(format!("[App] The user dismissed proposal {id} (\"Not now\")."));
     Ok(proposal)
 }
 
@@ -329,7 +329,7 @@ pub async fn assign_task(app: AppHandle, task: String, person: String, assigned:
     }
     let what = if assigned { "assigned" } else { "unassigned" };
     let to = if assigned { "to" } else { "from" };
-    app.state::<Notes>().add(format!("[App] The professor {what} the task \"{}\" {to} {}.", t.name, p.name));
+    app.state::<Notes>().add(format!("[App] The user {what} the task \"{}\" {to} {}.", t.name, p.name));
     Ok(())
 }
 
@@ -372,7 +372,7 @@ pub async fn set_aliases(graph: State<'_, Graph>, id: String, aliases: Vec<Strin
 pub async fn set_task_done(app: AppHandle, id: String, done: bool) -> Result<Entity, String> {
     let task = app.state::<Graph>().set_done(&id, done).map_err(text)?;
     let what = if done { "marked done" } else { "reopened" };
-    app.state::<Notes>().add(format!("[App] The professor {what} the task \"{}\".", task.name));
+    app.state::<Notes>().add(format!("[App] The user {what} the task \"{}\".", task.name));
     Ok(task)
 }
 
@@ -391,7 +391,7 @@ pub struct SidebarSection {
 
 #[derive(Serialize)]
 pub struct Sidebar {
-    /// Pages the professor starred, by name.
+    /// Pages the user starred, by name.
     favorites: Vec<Entity>,
     sections: Vec<SidebarSection>,
     /// Tags in use that have no section yet.
@@ -488,7 +488,7 @@ pub async fn submit_details(
     }
     if !given.is_empty() {
         app.state::<Notes>().add(format!(
-            "[App] The professor filled in details for {} in the app (already saved): {}.",
+            "[App] The user filled in details for {} in the app (already saved): {}.",
             entity.name,
             given.join("; ")
         ));
@@ -527,7 +527,7 @@ pub async fn fill_profile(
         let started = now_ms();
         activity.begin(vec![url.clone()]);
         let message = format!(
-            "[App] The professor gave this profile link for {name}: {url}\nRead it with read_link and save what it states about {name}: full_name, position, affiliation, department, email, homepage (this link), and research interests as a note. Don't add roles; the professor chooses those. Reply in one short sentence saying what you filled in, or why the page couldn't be read.",
+            "[App] The user gave this profile link for {name}: {url}\nRead it with read_link and save what it states about {name}: full_name, position, affiliation, department, email, homepage (this link), and research interests as a note. Don't add roles; the user chooses those. Reply in one short sentence saying what you filled in, or why the page couldn't be read.",
             name = entity.name
         );
         let content = pages::claude_message(&graph, Some(&entity), &[], &message)?;
@@ -551,7 +551,7 @@ pub async fn skip_details(app: AppHandle, id: String) -> Result<Entity, String> 
     let changes = BTreeMap::from([(DETAILS_SKIPPED.to_string(), Some("yes".to_string()))]);
     let entity = graph.update_info(&id, &changes).map_err(text)?;
     app.state::<Notes>().add(format!(
-        "[App] The professor skipped giving details for {}; don't ask for them.",
+        "[App] The user skipped giving details for {}; don't ask for them.",
         entity.name
     ));
     Ok(entity)
@@ -605,17 +605,12 @@ pub async fn get_vault(vault: State<'_, Vault>) -> Result<VaultInfo, String> {
     })
 }
 
-/// Opens a page's file in Obsidian, or the vault folder when Obsidian doesn't know it yet.
+/// Opens a page's Markdown file (or the whole folder): in Obsidian when the folder is one of its
+/// vaults, otherwise shown in Finder or the file manager.
 #[tauri::command]
-pub async fn open_in_obsidian(
-    app: AppHandle,
-    id: Option<String>,
-) -> Result<(), String> {
+pub async fn open_page_file(app: AppHandle, id: Option<String>) -> Result<(), String> {
     let vault = app.state::<Vault>();
     let graph = app.state::<Graph>();
-    if !vault::registered_in_obsidian(vault.root()) {
-        return open_target(&vault.root().display().to_string());
-    }
     let path = match id {
         Some(id) => {
             let entity = graph.get(&id).map_err(text)?.ok_or("page not found")?;
@@ -623,7 +618,21 @@ pub async fn open_in_obsidian(
         }
         None => vault.root().to_path_buf(),
     };
-    open_target(&format!("obsidian://open?path={}", percent_encode(&path.display().to_string())))
+    if vault::registered_in_obsidian(vault.root()) {
+        return open_target(&format!("obsidian://open?path={}", percent_encode(&path.display().to_string())));
+    }
+    reveal(&path)
+}
+
+/// Shows a file selected in Finder, or opens the folder it's in elsewhere.
+fn reveal(path: &std::path::Path) -> Result<(), String> {
+    if path.is_dir() {
+        return open_target(&path.display().to_string());
+    }
+    if cfg!(target_os = "macos") {
+        return std::process::Command::new("open").arg("-R").arg(path).status().map_err(|e| e.to_string()).map(|_| ());
+    }
+    open_target(&path.parent().unwrap_or(path).display().to_string())
 }
 
 fn percent_encode(s: &str) -> String {
@@ -824,7 +833,7 @@ pub async fn watch_info(graph: State<'_, Graph>, id: String) -> Result<WatchInfo
     watch::watch_info(&graph, &person).map_err(text)
 }
 
-/// OpenAlex authors who might be this person, for the professor to pick.
+/// OpenAlex authors who might be this person, for the user to pick.
 #[tauri::command]
 pub async fn openalex_candidates(app: AppHandle, id: String) -> Result<Vec<AuthorCandidate>, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -861,7 +870,7 @@ pub struct Update {
 }
 
 /// Activity from followed people, newest first. Without `all`, only what's relevant to the
-/// professor's work. What was already there when following started is listed only for one person.
+/// user's work. What was already there when following started is listed only for one person.
 #[tauri::command]
 pub async fn list_updates(graph: State<'_, Graph>, person: Option<String>, all: bool) -> Result<Vec<Update>, String> {
     let query = crate::graph::ActivityQuery { person: person.clone(), relevant_only: !all, limit: 200, ..Default::default() };

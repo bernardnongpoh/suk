@@ -2792,23 +2792,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "professor-os"
-version = "0.1.0"
-dependencies = [
- "axum",
- "chrono",
- "lbug",
- "reqwest",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tokio",
- "tower",
- "uuid",
-]
-
-[[package]]
 name = "quick-xml"
 version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3619,6 +3602,23 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "suk"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "lbug",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tokio",
+ "tower",
+ "uuid",
+]
 
 [[package]]
 name = "swift-rs"

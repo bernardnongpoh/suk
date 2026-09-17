@@ -40,7 +40,7 @@ type Busy = { what: "install"; log: string[] } | { what: "sign-in"; prompt: Sign
 
 /**
  * First run: choose Claude Code or Codex, install it and sign in without leaving the app.
- * Professor OS can't run without one of them.
+ * Suk can't run without one of them.
  */
 function Setup({ onReady, onCancel }: Props) {
   const [status, setStatus] = useState<AssistantStatus | null>(null);
@@ -137,9 +137,9 @@ function Setup({ onReady, onCancel }: Props) {
           <span className="setup-mark">
             <Icon name="sparkle" size={22} />
           </span>
-          <h1>{onCancel ? "Change your assistant" : "Welcome to Professor OS"}</h1>
+          <h1>{onCancel ? "Change your assistant" : "Welcome to Suk"}</h1>
           <p className="muted">
-            Professor OS works through an AI assistant you already use. It reads and saves your notes through the
+            Suk works through an AI assistant you already use. It reads and saves your notes through the
             assistant, so it needs one to run.
           </p>
         </div>
@@ -294,7 +294,7 @@ function Setup({ onReady, onCancel }: Props) {
 
             {!status.assistants.some((a) => a.signed_in) && (
               <div className="setup-need">
-                <strong>Don't have either?</strong> Professor OS can't run without Claude Code or Codex. They come with a
+                <strong>Don't have either?</strong> Suk can't run without Claude Code or Codex. They come with a
                 paid Claude or ChatGPT plan.{" "}
                 {kind && (
                   <button className="text-button" onClick={() => openUrl(ABOUT[kind].signUp).catch(() => {})}>

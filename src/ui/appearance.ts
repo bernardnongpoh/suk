@@ -19,7 +19,7 @@ export interface Appearance {
   accent: Accent;
 }
 
-const KEY = "professor-os.appearance";
+const KEY = "suk.appearance";
 
 export function loadAppearance(): Appearance {
   try {

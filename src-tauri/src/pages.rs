@@ -213,7 +213,7 @@ pub fn claude_message(
     let mut content = String::new();
     let mentioned: Vec<&Entity> = mentioned.iter().filter(|m| Some(&m.id) != focus.map(|f| &f.id)).collect();
     if !mentioned.is_empty() {
-        content.push_str("[Mentioned] Pages the professor picked while typing:\n");
+        content.push_str("[Mentioned] Pages the user picked while typing:\n");
         for page in mentioned {
             content.push_str(&format!("{}\n", crate::tools::describe(graph, page, false)?));
         }
@@ -221,7 +221,7 @@ pub fn claude_message(
     }
     if let Some(page) = focus {
         content.push_str(&format!(
-            "[Focus] The professor has the page for {} open. Its record:\n{}\n\n",
+            "[Focus] The user has the page for {} open. Its record:\n{}\n\n",
             page.name,
             crate::tools::describe(graph, page, true)?
         ));
@@ -279,12 +279,12 @@ pub fn record_turn(
     })
 }
 
-/// A task with who it's for, who the professor is waiting on, and the project or course it
+/// A task with who it's for, who the user is waiting on, and the project or course it
 /// belongs to.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct TaskItem {
     pub task: Entity,
-    /// Who is to do it; empty for the professor's own tasks.
+    /// Who is to do it; empty for the user's own tasks.
     pub assigned_to: Vec<Entity>,
     #[serde(rename = "for")]
     pub for_people: Vec<Entity>,
@@ -311,7 +311,7 @@ pub fn task_items(graph: &Graph, query: &TaskQuery) -> Result<Vec<TaskItem>, Gra
     Ok(items)
 }
 
-/// Marks an entity whose details form the professor skipped.
+/// Marks an entity whose details form the user skipped.
 pub const DETAILS_SKIPPED: &str = "details_skipped";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -328,7 +328,7 @@ pub struct RoleOption {
     pub label: &'static str,
 }
 
-/// How someone can be connected to the professor, as offered in the form.
+/// How someone can be connected to the user, as offered in the form.
 pub const ROLE_OPTIONS: &[RoleOption] = &[
     RoleOption { tag: "student", label: "My student" },
     RoleOption { tag: "collaborator", label: "Collaborator" },
@@ -360,7 +360,7 @@ fn role_fields(role: &str) -> &'static [Field] {
     }
 }
 
-/// What to ask about a person: their connection to the professor if unknown, and missing details.
+/// What to ask about a person: their connection to the user if unknown, and missing details.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct DetailsRequest {
     pub entity: Entity,
@@ -533,13 +533,13 @@ mod tests {
         assert_eq!(g.recent_messages(10).unwrap().len(), 2, "page chats stay out of the main chat");
 
         let focused = claude_message(&g, Some(&satya), &[], "What's his email?").unwrap();
-        assert!(focused.starts_with("[Focus] The professor has the page for Satya open. Its record:\n{"));
+        assert!(focused.starts_with("[Focus] The user has the page for Satya open. Its record:\n{"));
         assert!(focused.contains("Satya works on Fuzzing") && focused.ends_with("\n\nWhat's his email?"));
 
         // Picked while typing: records come first, and the exchange is stored on those pages.
         let meera = g.upsert_entity("Student", "Meera").unwrap();
         let sent = claude_message(&g, None, &[meera.clone(), fuzzing.clone()], "Meera joins Fuzzing").unwrap();
-        assert!(sent.starts_with("[Mentioned] Pages the professor picked while typing:\n{\"name\":\"Meera\""));
+        assert!(sent.starts_with("[Mentioned] Pages the user picked while typing:\n{\"name\":\"Meera\""));
         assert!(sent.contains("\"name\":\"Fuzzing\"") && sent.ends_with("\n\nMeera joins Fuzzing"));
         let outcome = record_turn(&g, crate::graph::tests_now(), None, &[meera.id.clone()], &[], &[], "Meera joins Fuzzing", "Done.").unwrap();
         assert!(outcome.details.is_empty() && outcome.sections.is_empty(), "nothing new, nothing offered");

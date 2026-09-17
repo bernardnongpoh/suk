@@ -1,7 +1,7 @@
 //! Two-way sync between the graph and an Obsidian vault: a folder of Markdown files, one per page.
 //!
 //! A page's file holds its type, tags and details as frontmatter (Obsidian "properties"), the
-//! professor's notes as the body, and a generated list of its relationships as [[wikilinks]] so
+//! user's notes as the body, and a generated list of its relationships as [[wikilinks]] so
 //! Obsidian's graph and backlinks work. Edits made in Obsidian are read back; the frontmatter `id`
 //! keeps a page's identity when its file is renamed or moved.
 //!
@@ -24,8 +24,16 @@ use crate::graph::{
 };
 use crate::pages::wikilinks;
 
-/// Starts the generated part of a file; everything below it is rewritten by the app.
-const MARKER: &str = "%% Professor OS keeps the list below up to date. Edits below this line are replaced. %%";
+/// Starts the generated part of a file; everything below it is rewritten by the app. An HTML
+/// comment, so no Markdown editor or viewer shows it.
+const MARKER: &str = "<!-- Suk keeps the list below up to date. Edits below this line are replaced. -->";
+/// Markers written by earlier releases; files with them are read the same way and rewritten.
+const OLD_MARKERS: &[&str] = &["%% Professor OS keeps the list below up to date. Edits below this line are replaced. %%"];
+
+/// Where the generated part of a file starts, whichever marker it uses.
+fn marker_position(text: &str) -> Option<usize> {
+    std::iter::once(MARKER).chain(OLD_MARKERS.iter().copied()).filter_map(|m| text.find(m)).min()
+}
 /// How long a file must be unchanged before it is read or rewritten.
 const SETTLE_MS: u64 = 3000;
 /// Frontmatter keys Obsidian uses itself; kept out of a page's details.
@@ -166,9 +174,8 @@ pub fn parse(text: &str) -> Page {
             body = &rest[after..];
         }
     }
-    let body = match body.find(&format!("\n{MARKER}")) {
+    let body = match marker_position(body) {
         Some(i) => &body[..i],
-        None if body.starts_with(MARKER) => "",
         None => body,
     };
     page.notes = body.trim_start_matches('\n').trim_end().to_string();
@@ -221,7 +228,7 @@ fn read_frontmatter(yaml: &str, page: &mut Page) {
 
 /// The generated part of a file, for comparing two versions of it.
 fn generated(text: &str) -> &str {
-    text.find(MARKER).map_or("", |i| text[i..].trim_end())
+    marker_position(text).map_or("", |i| text[i..].trim_end())
 }
 
 /// Whether two versions of a file say the same thing, ignoring formatting.
@@ -630,7 +637,7 @@ mod tests {
             text,
             "---\nid: \"person:satya\"\ntype: Person\ntags:\n  - person\n  - student\n  - phd\nemail: satya@example.edu\n\
              full_name: \"Satya: \\\"S\\\" Das\"\nstart: 2026-08\n---\nMet on [[2026-09-17]].\n\n- Likes Rust\n\n\
-             %% Professor OS keeps the list below up to date. Edits below this line are replaced. %%\n\
+             <!-- Suk keeps the list below up to date. Edits below this line are replaced. -->\n\
              ## Connections\n- Works on [[Fuzzing]]\n- [[Prof Sharma]] supervises this\n\
              - Is at [[IIT Guwahati]] (PhD scholar, since 2024)\n"
         );
@@ -640,6 +647,18 @@ mod tests {
         assert_eq!(page.tags, vec!["person", "student", "phd"]);
         assert_eq!(page.info, satya.info);
         assert_eq!(page.notes, "Met on [[2026-09-17]].\n\n- Likes Rust");
+    }
+
+    #[test]
+    fn files_from_earlier_releases_are_read_and_their_marker_replaced() {
+        let old = "---\ntype: Project\n---\nGrammar fuzzing.\n\n%% Professor OS keeps the list below up to date. Edits below this line are replaced. %%\n## Connections\n- Old list\n";
+        let page = parse(old);
+        assert_eq!(page.notes, "Grammar fuzzing.");
+        assert_eq!(generated(old), "%% Professor OS keeps the list below up to date. Edits below this line are replaced. %%\n## Connections\n- Old list");
+        let link = Link { kind: "WORKS_ON".into(), outgoing: false, other: entity("Person", "Satya"), detail: None, since: None, until: None };
+        let rendered = render(&entity("Project", "Fuzzing"), &[link]);
+        assert!(!same(old, &rendered), "rewritten with the new marker");
+        assert!(rendered.contains("<!-- Suk keeps the list"));
     }
 
     #[test]
@@ -664,7 +683,7 @@ mod tests {
 
     impl TestVault {
         fn new(name: &str) -> Self {
-            let root = std::env::temp_dir().join(format!("professor-os-vault-{name}-{}", std::process::id()));
+            let root = std::env::temp_dir().join(format!("suk-vault-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&root);
             let vault = Vault::new(root);
             vault.settle_ms.store(0, Ordering::Relaxed);
@@ -724,7 +743,7 @@ mod tests {
         assert_eq!(satya.notes, "Wants to try [[Fuzzing]] on LLVM.");
         assert!(g.links(&satya.id).unwrap().iter().any(|l| l.kind == "LINKS_TO" && l.other.name == "Fuzzing"));
         // The file is rewritten only if the app's version says something different; here the new
-        // LINKS_TO is not listed, so the file is left as the professor wrote it.
+        // LINKS_TO is not listed, so the file is left as the user wrote it.
         assert_eq!(report.written, 0);
         assert_eq!(t.read("People/Satya.md"), edited);
     }
@@ -744,7 +763,7 @@ mod tests {
         assert_eq!(g.find_by_name("Dr Chen").unwrap().unwrap().kind, "Person");
         let note = g.find_by_name("Reading list").unwrap().unwrap();
         assert_eq!(note.kind, "Note");
-        // Frontmatter is added, and the note stays where the professor put it.
+        // Frontmatter is added, and the note stays where the user put it.
         assert!(t.read("Reading list.md").starts_with("---\nid: \"note:reading list\"\ntype: Note\n"));
         assert_eq!(parse(&t.read("Reading list.md")).notes, "Read the [[Satya]] draft");
 

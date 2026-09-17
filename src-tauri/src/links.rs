@@ -1,7 +1,7 @@
-//! Reading web pages the professor pasted, such as a student's profile, as plain text for Claude.
+//! Reading web pages the user pasted, such as a student's profile, as plain text for Claude.
 //!
-//! Only links from the professor's own message can be read, and never addresses on this computer
-//! or the local network, so a page can't make the app reach anything the professor didn't give.
+//! Only links from the user's own message can be read, and never addresses on this computer
+//! or the local network, so a page can't make the app reach anything the user didn't give.
 
 use std::time::Duration;
 
@@ -72,7 +72,7 @@ pub fn fetch(url: &str, allow_private: bool) -> Result<String, String> {
     tauri::async_runtime::block_on(async move {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
-            .user_agent("Mozilla/5.0 (Macintosh) ProfessorOS/0.1")
+            .user_agent("Mozilla/5.0 (Macintosh) Suk/0.1")
             .build()
             .map_err(|e| e.to_string())?;
         let response = client.get(parsed).send().await.map_err(|e| format!("couldn't open the link: {e}"))?;

@@ -2,7 +2,7 @@
 //! on OpenAlex, homepages, RSS/Atom feeds including GitHub), and storing it as activity.
 //!
 //! X/Twitter, LinkedIn and Google Scholar forbid or block reading by apps, so their links are
-//! kept for the professor to open but never fetched. The first check of a source stores what is
+//! kept for the user to open but never fetched. The first check of a source stores what is
 //! already there as baseline, so only later additions are news.
 
 use std::collections::hash_map::DefaultHasher;
@@ -16,7 +16,7 @@ use crate::links::{decode, extract};
 
 /// A followed person's sources are read at most this often, unless a check is asked for.
 pub const CHECK_EVERY_MS: i64 = 6 * 60 * 60 * 1000;
-/// The tag marking people the professor follows.
+/// The tag marking people the user follows.
 pub const FOLLOWING: &str = "following";
 const OPENALEX: &str = "https://api.openalex.org";
 const MAX_PAGE_TEXT: usize = 50_000;
@@ -420,15 +420,15 @@ pub fn check_person(graph: &Graph, fetch: &dyn Fetch, person: &Entity, force: bo
 }
 
 /// How Claude is told to judge updates.
-pub const JUDGE_SYSTEM: &str = "You help a university professor keep up with researchers they follow. \
-You get the professor's research areas, projects and ideas, and new papers, posts and page changes from people they follow. \
-Judge each item only against the professor's work as listed; don't guess at interests that aren't listed. \
+pub const JUDGE_SYSTEM: &str = "You help someone keep up with people whose work they follow. \
+You get the user's research areas, projects and ideas, and new papers, posts and page changes from people they follow. \
+Judge each item only against the user's work as listed; don't guess at interests that aren't listed. \
 Keep reasons under 20 words, and name the specific project, idea or area.";
 
 /// How many items are judged in one question.
 const JUDGE_BATCH: usize = 20;
 
-/// The professor's research areas, projects and ideas: what updates are judged against.
+/// The user's research areas, projects and ideas: what updates are judged against.
 fn interests(graph: &Graph) -> Result<Vec<(&'static str, Entity)>, GraphError> {
     let mut found = Vec::new();
     for kind in ["ResearchArea", "Project", "Idea"] {
@@ -438,7 +438,7 @@ fn interests(graph: &Graph) -> Result<Vec<(&'static str, Entity)>, GraphError> {
 }
 
 /// Judges new activity that hasn't been judged, asking `ask(prompt, schema)` for the answer.
-/// Nothing is judged while the professor has no research areas, projects or ideas to match.
+/// Nothing is judged while the user has no research areas, projects or ideas to match.
 /// Returns how many items were judged.
 pub fn judge_pending(graph: &Graph, ask: &dyn Fn(&str, &Value) -> Result<Value, String>) -> Result<usize, String> {
     if interests(graph).map_err(|e| e.to_string())?.is_empty() {
@@ -455,7 +455,7 @@ pub fn judge_pending(graph: &Graph, ask: &dyn Fn(&str, &Value) -> Result<Value, 
     apply_judgements(graph, &answer).map_err(|e| e.to_string())
 }
 
-/// Relevant new activity the professor hasn't been notified about, marked notified.
+/// Relevant new activity the user hasn't been notified about, marked notified.
 pub fn take_notifications(graph: &Graph) -> Result<Vec<Activity>, GraphError> {
     let items: Vec<Activity> = graph
         .activities(&ActivityQuery { relevant_only: true, unseen_only: true, ..Default::default() })?
@@ -480,7 +480,7 @@ pub struct Watcher {
 pub struct Round {
     pub new: usize,
     pub judged: usize,
-    /// Relevant new items to notify the professor about, with the person's name.
+    /// Relevant new items to notify the user about, with the person's name.
     pub notify: Vec<(Activity, String)>,
     pub errors: Vec<String>,
 }
@@ -557,9 +557,9 @@ pub fn notification(items: &[(Activity, String)]) -> Option<(String, String)> {
     }
 }
 
-/// The professor's interests and the new activity, for Claude to judge.
+/// The user's interests and the new activity, for Claude to judge.
 pub fn judge_prompt(graph: &Graph, items: &[Activity]) -> Result<String, GraphError> {
-    let mut prompt = String::from("The professor's work:\n");
+    let mut prompt = String::from("The user's work:\n");
     for (kind, e) in interests(graph)? {
         let notes = truncate(&e.notes.replace('\n', " "), 240);
         let tags = e.tags.join(", ");
@@ -570,7 +570,7 @@ pub fn judge_prompt(graph: &Graph, items: &[Activity]) -> Result<String, GraphEr
             if notes.is_empty() { String::new() } else { format!(" — {notes}") }
         ));
     }
-    prompt.push_str("\nNew activity from people the professor follows:\n");
+    prompt.push_str("\nNew activity from people the user follows:\n");
     for item in items {
         let who = graph.get(&item.person)?.map(|p| p.name).unwrap_or_default();
         prompt.push_str(&format!(
@@ -583,7 +583,7 @@ pub fn judge_prompt(graph: &Graph, items: &[Activity]) -> Result<String, GraphEr
         ));
     }
     prompt.push_str(
-        "\nFor each item, judge how relevant it is to the professor's work: high (directly on one of their projects, ideas or areas), medium (useful nearby work), low (same broad field), none. Give a short reason naming what it relates to, and the exact names of the related pages from the list above.",
+        "\nFor each item, judge how relevant it is to the user's work: high (directly on one of their projects, ideas or areas), medium (useful nearby work), low (same broad field), none. Give a short reason naming what it relates to, and the exact names of the related pages from the list above.",
     );
     Ok(prompt)
 }
@@ -934,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_judged_without_the_professors_work_to_match() {
+    fn nothing_is_judged_without_the_users_work_to_match() {
         let g = Graph::in_memory().unwrap();
         let p = g.upsert_entity("Person", "Andreas Zeller").unwrap();
         let mut item = activity(&p.id, "openalex-1");
@@ -980,7 +980,7 @@ mod tests {
     }
 
     #[test]
-    fn judgements_are_asked_for_with_the_professors_work_and_stored() {
+    fn judgements_are_asked_for_with_the_users_work_and_stored() {
         let g = Graph::in_memory().unwrap();
         let project = g.upsert_entity("Project", "Solidity Compiler Fuzzing").unwrap();
         g.set_notes(&project.id, "BTP project: fuzz solc with grammar-based inputs").unwrap();

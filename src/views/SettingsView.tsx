@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { assistantStatus, getVault, openInObsidian, type AssistantStatus, type VaultInfo } from "../api";
+import { assistantStatus, getVault, openPageFile, type AssistantStatus, type VaultInfo } from "../api";
 import Icon from "../ui/Icon";
 import { ACCENTS, applyAppearance, loadAppearance, type Appearance, type Theme } from "../ui/appearance";
 
@@ -100,8 +100,8 @@ function SettingsView({ onChangeAssistant }: Props) {
                 {current
                   ? current.signed_in
                     ? `Signed in${current.account ? ` as ${current.account}` : ""}. Your messages and notes are sent to ${current.kind === "claude" ? "Anthropic" : "OpenAI"}.`
-                    : `${current.installed ? "Not signed in" : "Not installed"}, so Professor OS can't answer.`
-                  : "Professor OS needs Claude Code or Codex to run."}
+                    : `${current.installed ? "Not signed in" : "Not installed"}, so Suk can't answer.`
+                  : "Suk needs Claude Code or Codex to run."}
               </div>
             </div>
             <span className={`status-dot${assistant.ready ? " ok" : ""}`} />
@@ -130,29 +130,29 @@ function SettingsView({ onChangeAssistant }: Props) {
         </div>
       )}
 
-      <h2 className="section-title">Obsidian vault</h2>
+      <h2 className="section-title">Your files</h2>
       {vault && (
         <div className="settings-card vault">
           <div className="settings-row">
             <span className="section-icon">
-              <Icon name="obsidian" size={15} />
+              <Icon name="document" size={15} />
             </span>
             <div className="settings-text">
               <div className="muted">
-                Every page is also a Markdown file here, and edits you make in Obsidian come back into
-                the app within a few seconds.
+                Every page is a plain Markdown file in this folder, and they're yours: open them in any editor,
+                back them up, or keep the folder in iCloud or Dropbox. Changes you make there come back into Suk
+                within a few seconds.
               </div>
               <p className="system">
                 <code>{vault.path}</code>
               </p>
-              {!vault.registered && (
-                <p className="system">
-                  To use it in Obsidian once: open Obsidian, choose "Open folder as vault", and pick this
-                  folder.
-                </p>
-              )}
+              <p className="system">
+                {vault.registered
+                  ? "Obsidian has this folder as a vault, so pages open there."
+                  : "Use Obsidian? Choose \"Open folder as vault\" there and pick this folder; pages will then open in Obsidian."}
+              </p>
             </div>
-            <button className="button small" onClick={() => openInObsidian(null).catch((err) => setError(String(err)))}>
+            <button className="button small" onClick={() => openPageFile(null).catch((err) => setError(String(err)))}>
               {vault.registered ? "Open in Obsidian" : "Show folder"}
             </button>
           </div>

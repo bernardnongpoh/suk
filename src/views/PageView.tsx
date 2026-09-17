@@ -5,7 +5,8 @@ import {
   assignTask,
   linkAffiliation,
   listEntities,
-  openInObsidian,
+  getVault,
+  openPageFile,
   openPage,
   openUrl,
   renamePage,
@@ -48,7 +49,7 @@ import {
 
 interface Props {
   id: string;
-  /** Bumped when pages may have changed elsewhere (chat, Obsidian). */
+  /** Bumped when pages may have changed elsewhere (chat, edits to the Markdown files). */
   version: number;
   onOpen: (id: string) => void;
   onBack: (() => void) | null;
@@ -98,6 +99,11 @@ function section(link: Link): string {
 
 function PageView({ id, version, onOpen, onBack, onChanged }: Props) {
   const [detail, setDetail] = useState<EntityDetail | null>(null);
+  // Pages open in Obsidian when their folder is a vault there; otherwise the file is shown.
+  const [inObsidian, setInObsidian] = useState(false);
+  useEffect(() => {
+    getVault().then((v) => setInObsidian(v.registered), () => {});
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -232,9 +238,9 @@ function PageView({ id, version, onOpen, onBack, onChanged }: Props) {
             >
               <Icon name="star" size={16} />
             </button>
-            <button className="button ghost small" onClick={() => report(openInObsidian(entity.id))}>
-              <Icon name="obsidian" size={14} />
-              Open in Obsidian
+            <button className="button ghost small" title="This page is a Markdown file" onClick={() => report(openPageFile(entity.id))}>
+              <Icon name={inObsidian ? "obsidian" : "document"} size={14} />
+              {inObsidian ? "Open in Obsidian" : "Show file"}
             </button>
             <div className="menu-anchor">
               <button className="icon-button" aria-label="Page options" onClick={() => setMenu(menu === "page" ? null : "page")}>

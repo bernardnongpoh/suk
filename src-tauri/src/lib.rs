@@ -7,6 +7,7 @@ mod commands;
 mod graph;
 mod links;
 mod mcp;
+mod migrate;
 mod pages;
 mod relations;
 mod tools;
@@ -48,7 +49,7 @@ fn start_vault_sync(app: AppHandle) {
     });
 }
 
-/// Checks people the professor follows: shortly after launch, then every minute for sources that
+/// Checks people the user follows: shortly after launch, then every minute for sources that
 /// are due (each is read at most every few hours).
 fn start_watching(app: AppHandle) {
     std::thread::spawn(move || {
@@ -62,19 +63,27 @@ fn start_watching(app: AppHandle) {
     });
 }
 
+/// The database file in the app data directory.
+const DATABASE: &str = "suk.lbdb";
+/// The folder in Documents that holds every page as a Markdown file.
+const FOLDER: &str = "Suk";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
+            // Linux systems without a desktop setup have no known Documents folder; use ~/Documents.
+            let documents = app.path().document_dir().or_else(|_| app.path().home_dir().map(|home| home.join("Documents")))?;
+            for moved in migrate::from_old_name(&data_dir, DATABASE, &documents, FOLDER) {
+                eprintln!("migrate: moved {moved}");
+            }
             std::fs::create_dir_all(&data_dir)?;
-            let graph = graph::Graph::open(data_dir.join("professor.lbdb"))?;
+            let graph = graph::Graph::open(data_dir.join(DATABASE))?;
             app.manage(graph);
             app.manage(tools::Proposals::default());
             app.manage(tools::Activity::default());
-            // Linux systems without a desktop setup have no known Documents folder; use ~/Documents.
-            let documents = app.path().document_dir().or_else(|_| app.path().home_dir().map(|home| home.join("Documents")))?;
-            let vault_root = documents.join("Professor OS");
+            let vault_root = documents.join(FOLDER);
             app.manage(vault::Vault::new(vault_root));
             start_vault_sync(app.handle().clone());
             app.manage(claude::Claude::default());
@@ -113,7 +122,7 @@ pub fn run() {
             commands::rename_page,
             commands::delete_page,
             commands::get_vault,
-            commands::open_in_obsidian,
+            commands::open_page_file,
             commands::open_url,
             commands::assistant_status,
             commands::choose_assistant,

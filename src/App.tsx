@@ -79,7 +79,7 @@ function App() {
 
   useEffect(() => {
     getSidebar().then(setSidebar, () => {});
-    // Edits made in Obsidian.
+    // Edits made to the Markdown files, in Obsidian or any editor.
     const unlisten = listen("pages-changed", changed).catch(() => () => {});
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {

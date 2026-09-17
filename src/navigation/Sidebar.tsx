@@ -30,7 +30,7 @@ const NEW_KINDS: { kind: EntityKind; label: string; icon: string; placeholder: s
 const isMac = navigator.platform.toLowerCase().includes("mac");
 
 /**
- * Today, Chat, Updates and Notes are always there. Everything else is sections the professor added,
+ * Today, Chat, Updates and Notes are always there. Everything else is sections the user added,
  * usually from a suggestion after mentioning something new; tags in use without a section are
  * offered at the bottom.
  */
@@ -88,7 +88,7 @@ function Sidebar({ route, data, unread, onSelect, onSearch, onOpen, onChanged }:
         <span className="brand-mark">
           <Icon name="sparkle" size={14} />
         </span>
-        <span className="brand-name">Professor OS</span>
+        <span className="brand-name">Suk</span>
         <span className="menu-anchor">
           <button className="icon-button new-button" aria-label="New page" title="New page" onClick={() => setMenu(menu === "new" ? null : "new")}>
             <Icon name="plus" size={16} />

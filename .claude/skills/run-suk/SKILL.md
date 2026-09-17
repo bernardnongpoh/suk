@@ -1,9 +1,9 @@
 ---
-name: run-professor-os
-description: Launch the Professor OS Tauri app and drive its React UI (chat, sidebar views) to verify a change works. Use when asked to run, start, screenshot, or smoke-test the app on macOS.
+name: run-suk
+description: Launch the Suk Tauri app and drive its React UI (chat, sidebar views) to verify a change works. Use when asked to run, start, screenshot, or smoke-test the app on macOS.
 ---
 
-# Run Professor OS
+# Run Suk
 
 Tauri 2 + React + TypeScript desktop app. Frontend is served by Vite on
 `http://localhost:1420`; the Rust shell loads it into a native WebView.
@@ -27,12 +27,12 @@ Wait for readiness. The log contains ANSI color codes, so match the binary
 path, not the literal "Running `...`" string:
 
 ```bash
-until grep -qE 'target/debug/professor-os|error\[|panicked' "$SCRATCH/tauri-dev.log"; do sleep 1; done
-tail -5 "$SCRATCH/tauri-dev.log"; pgrep -fl target/debug/professor-os
+until grep -qE 'target/debug/suk|error\[|panicked' "$SCRATCH/tauri-dev.log"; do sleep 1; done
+tail -5 "$SCRATCH/tauri-dev.log"; pgrep -fl target/debug/suk
 ```
 
 Also confirm the frontend: `curl -s http://localhost:1420/ | grep -o '<title>.*</title>'`
-should print `<title>Professor OS</title>`.
+should print `<title>Suk</title>`.
 
 ## 2. Drive the UI
 
@@ -50,7 +50,7 @@ No npm installs are needed (Node's built-in `fetch`/`WebSocket`):
   --hide-scrollbars --remote-debugging-port=9223 --user-data-dir="$SCRATCH/chrome-profile" \
   --window-size=1100,720 about:blank > "$SCRATCH/chrome.log" 2>&1   # run_in_background
 
-node .claude/skills/run-professor-os/drive.mjs "$SCRATCH"
+node .claude/skills/run-suk/drive.mjs "$SCRATCH"
 ```
 
 `drive.mjs` walks the people flow in light mode, then dark: a new name in chat
@@ -94,14 +94,14 @@ planning from the `tasks` tool, and a task ticked off in the app; `claude_organi
 page per institution whatever it's called (aliases), departments PART_OF it, positions and dates on
 AFFILIATED_WITH/STUDIED_AT links, a move kept as history, and "who do I know at IITG"; `claude_rename`
 covers renaming a page's heading; `claude_assigned_tasks` covers a task delegated to two students
-(ASSIGNED_TO) kept apart from the professor's own; `claude_project_status` covers projects becoming
+(ASSIGNED_TO) kept apart from the user's own; `claude_project_status` covers projects becoming
 in-progress, planned or completed from how they're described, and "which projects are ongoing"; `claude_corrections`
 covers a real mix-up: a pasted student must not be tied to an earlier Faculty Advisor
 follow-up task, and "this is wrong" must undo the tie (name, notes, links), not just reword it. To
 inspect what was said in the real app, copy the DB and run `dump_messages` in graph.rs. `claude_following` covers following a researcher
 from pasted links (X/LinkedIn kept, not read) and Claude asking which OpenAlex author is theirs. It
 also covers a real first check of OpenAlex and their homepage (baseline, nothing reported), and
-Claude rating new papers against the professor's projects, ideas, and research areas. It also uses
+Claude rating new papers against the user's projects, ideas, and research areas. It also uses
 the network.
 
 Design (drive.mjs steps 34–42): page and section emoji icons (`ui/IconPicker.tsx`, suggestions in
@@ -118,7 +118,7 @@ There are deliberately no OS notifications. `drive.mjs` exercises these screens;
 payload)` in its stub fires backend events such as the toast.
 
 `tauri dev` rebuilds and restarts the app on every Rust change, against the real database and the
-real vault in `~/Documents/Professor OS`. Back up both before changing sync or schema code.
+real vault in `~/Documents/Suk`. Back up both before changing sync or schema code.
 
 Read the transcript: tool calls, replies, and the final graph dump. The calendar steps depend on
 the Google Calendar connector being authenticated (`claude`, then `/mcp`); the log prints its
@@ -134,8 +134,8 @@ status (`needs-auth` means not connected).
   `CODEX_BIN=/path/to/codex cargo test --lib real_codex_accepts -- --ignored --nocapture`
   (install one in the scratchpad with `npm i @openai/codex`).
 - Release build on macOS: `OPENSSL_DIR="$(scripts/static-openssl.sh)" npm run tauri build`, then
-  `otool -L` on `Contents/MacOS/professor-os` must show no `/opt/homebrew` paths. Smoke test with
-  `env -i HOME=<empty dir> PATH=/usr/bin:/bin "<app>/Contents/MacOS/professor-os"`: it prints
+  `otool -L` on `Contents/MacOS/suk` must show no `/opt/homebrew` paths. Smoke test with
+  `env -i HOME=<empty dir> PATH=/usr/bin:/bin "<app>/Contents/MacOS/suk"`: it prints
   `mcp: tools…` and stays running.
 - Releases: push a `v*` tag; `.github/workflows/release.yml` builds macOS arm64/x64 and Linux
   x86_64/arm64 into a draft release. Test Linux packages in Docker (`ubuntu:24.04`) before
@@ -148,5 +148,5 @@ status (`needs-auth` means not connected).
 pkill -f 'remote-debugging-port=9223'
 ```
 
-Stopping the app: kill the background `tauri dev` task (or `pkill -f target/debug/professor-os; pkill -f node_modules/.bin/vite`).
+Stopping the app: kill the background `tauri dev` task (or `pkill -f target/debug/suk; pkill -f node_modules/.bin/vite`).
 Exit code 144 on a background task you killed is expected.

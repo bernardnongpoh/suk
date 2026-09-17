@@ -9,7 +9,7 @@ interface Props {
   about?: string;
   /** Group by when they're due, as on Today. */
   grouped?: boolean;
-  /** Only the professor's own tasks, or only those assigned to other people. */
+  /** Only the user's own tasks, or only those assigned to other people. */
   assigned?: "mine" | "others";
   version: number;
   onOpen: (id: string) => void;

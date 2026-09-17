@@ -62,11 +62,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: Professor OS ${{ github.ref_name }}
+          releaseName: Suk ${{ github.ref_name }}
           releaseBody: |
             Install on macOS or Linux:
 
-                curl -fsSL https://raw.githubusercontent.com/bernardnongpoh/professor-os/main/install.sh | sh
+                curl -fsSL https://raw.githubusercontent.com/bernardnongpoh/suk/main/install.sh | sh
 
             Or download the file for your computer below. On macOS, the app isn't signed yet: if you open the .dmg download, right-click the app and choose Open the first time.
           releaseDraft: true
@@ -75,7 +75,7 @@ jobs:
       - name: Check the macOS app doesn't depend on Homebrew
         if: runner.os == 'macOS'
         run: |
-          binary="$(find src-tauri/target/release/bundle/macos -name professor-os -path '*Contents/MacOS*' | head -1)"
+          binary="$(find src-tauri/target/release/bundle/macos -name suk -path '*Contents/MacOS*' | head -1)"
           otool -L "$binary"
           if otool -L "$binary" | grep -E '/opt/homebrew|/usr/local/(opt|Cellar)'; then
             echo "The app links a library from Homebrew" >&2

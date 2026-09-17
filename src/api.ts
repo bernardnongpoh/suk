@@ -9,7 +9,7 @@ export interface Entity {
   info: Record<string, string>;
   /** Tags beyond the one the kind implies. */
   tags: string[];
-  /** Markdown the professor writes on the page. */
+  /** Markdown the user writes on the page. */
   notes: string;
   updated_at: number;
   /** Other names the page is found by ("IITG"). */
@@ -113,10 +113,10 @@ export const ROLES: RoleOption[] = [
   { tag: "alumni", label: "Former student" },
 ];
 
-/** A task with who it's for, who the professor is waiting on, and its project or course. */
+/** A task with who it's for, who the user is waiting on, and its project or course. */
 export interface TaskItem {
   task: Entity;
-  /** Who is to do it; empty for the professor's own tasks. */
+  /** Who is to do it; empty for the user's own tasks. */
   assigned_to: Entity[];
   for: Entity[];
   waiting_on: Entity[];
@@ -297,7 +297,8 @@ export const deletePage = (id: string) => invoke<void>("delete_page", { id });
 
 export const getVault = () => invoke<VaultInfo>("get_vault");
 
-export const openInObsidian = (id: string | null) => invoke<void>("open_in_obsidian", { id });
+/** Opens a page's Markdown file, or the folder with null: in Obsidian if it's a vault there, otherwise in Finder or the file manager. */
+export const openPageFile = (id: string | null) => invoke<void>("open_page_file", { id });
 
 export const listEntities = (kind: EntityKind) =>
   invoke<Entity[]>("list_entities", { kind });
@@ -343,7 +344,7 @@ export interface Activity {
   /** "high", "medium", "low" or "none"; empty until Claude has judged it. */
   relevance: "" | "high" | "medium" | "low" | "none";
   reason: string;
-  /** Names of the professor's pages it relates to. */
+  /** Names of the user's pages it relates to. */
   related: string[];
   seen: boolean;
   notified: boolean;

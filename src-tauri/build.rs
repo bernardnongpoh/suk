@@ -26,7 +26,7 @@ fn main() {
             "rename_page",
             "delete_page",
             "get_vault",
-            "open_in_obsidian",
+            "open_page_file",
             "open_url",
             "assistant_status",
             "choose_assistant",

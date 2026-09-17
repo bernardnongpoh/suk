@@ -43,7 +43,7 @@ function NotesView({ version, onOpen, onChanged }: Props) {
       <div className="page-header">
         <div>
           <h1>Notes</h1>
-          <p className="muted">Also in your Obsidian vault.</p>
+          <p className="muted">Also saved as Markdown files.</p>
         </div>
         {title === null && (
           <button className="button primary" onClick={() => setTitle("")}>

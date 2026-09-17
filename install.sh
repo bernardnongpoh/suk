@@ -1,19 +1,19 @@
 #!/bin/sh
-# Installs Professor OS on macOS or Linux.
+# Installs Suk on macOS or Linux.
 #
-#   curl -fsSL https://raw.githubusercontent.com/bernardnongpoh/professor-os/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/bernardnongpoh/suk/main/install.sh | sh
 #
 # Options (after `sh -s --` when piping):
 #   --version v0.1.0   install a specific release instead of the latest
 #   --appimage         Linux: install the AppImage into ~/.local/bin (no sudo)
 #
 # Environment:
-#   PROFESSOR_OS_INSTALL_DIR   macOS: where the app goes (default /Applications, or ~/Applications)
+#   SUK_INSTALL_DIR   macOS: where the app goes (default /Applications, or ~/Applications)
 
 set -eu
 
-REPO="bernardnongpoh/professor-os"
-APP_NAME="Professor OS"
+REPO="bernardnongpoh/suk"
+APP_NAME="Suk"
 VERSION="latest"
 USE_APPIMAGE=0
 
@@ -34,7 +34,7 @@ bold() { printf '\033[1m%s\033[0m\n' "$1"; }
 step() { printf '  \033[35m›\033[0m %s\n' "$1"; }
 fail() { printf '\033[31mError:\033[0m %s\n' "$1" >&2; exit 1; }
 
-need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is needed to install Professor OS."; }
+need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is needed to install Suk."; }
 need curl
 need uname
 
@@ -46,7 +46,7 @@ arch="$(uname -m)"
 case "$arch" in
   arm64|aarch64) arch=aarch64 ;;
   x86_64|amd64) arch=x86_64 ;;
-  *) fail "Unsupported processor: $arch. Professor OS runs on 64-bit Intel/AMD and ARM." ;;
+  *) fail "Unsupported processor: $arch. Suk runs on 64-bit Intel/AMD and ARM." ;;
 esac
 
 if [ "$VERSION" = "latest" ]; then
@@ -77,8 +77,8 @@ install_macos() {
   [ -n "$url" ] || fail "This release has no download for macOS on $arch."
   download "$url" "$TMP/app.dmg"
 
-  dest="${PROFESSOR_OS_INSTALL_DIR:-/Applications}"
-  if [ -z "${PROFESSOR_OS_INSTALL_DIR:-}" ] && [ ! -w "$dest" ]; then
+  dest="${SUK_INSTALL_DIR:-/Applications}"
+  if [ -z "${SUK_INSTALL_DIR:-}" ] && [ ! -w "$dest" ]; then
     dest="$HOME/Applications"
   fi
   mkdir -p "$dest"
@@ -109,19 +109,19 @@ install_appimage() {
   [ -n "$url" ] || fail "This release has no AppImage for $arch."
   bin="$HOME/.local/bin"
   mkdir -p "$bin" "$HOME/.local/share/applications"
-  download "$url" "$bin/professor-os"
-  chmod +x "$bin/professor-os"
-  cat > "$HOME/.local/share/applications/professor-os.desktop" <<DESKTOP
+  download "$url" "$bin/suk"
+  chmod +x "$bin/suk"
+  cat > "$HOME/.local/share/applications/suk.desktop" <<DESKTOP
 [Desktop Entry]
 Name=$APP_NAME
 Comment=Students, research, teaching and admin in one calm place
-Exec=$bin/professor-os
+Exec=$bin/suk
 Terminal=false
 Type=Application
 Categories=Office;Utility;
 DESKTOP
-  bold "Installed $APP_NAME in $bin/professor-os."
-  echo "Start it from your applications menu, or run: professor-os"
+  bold "Installed $APP_NAME in $bin/suk."
+  echo "Start it from your applications menu, or run: suk"
   case ":$PATH:" in *":$bin:"*) ;; *) echo "(Add $bin to your PATH to run it by name.)" ;; esac
   if ! ls /usr/lib*/libfuse.so.2 /usr/lib/*/libfuse.so.2 >/dev/null 2>&1; then
     echo "If it doesn't start, install FUSE 2 (Ubuntu: sudo apt install libfuse2t64 or libfuse2)."
@@ -133,12 +133,12 @@ install_linux() {
     case "$arch" in aarch64) pattern='_arm64\.deb$' ;; x86_64) pattern='_amd64\.deb$' ;; esac
     url="$(pick "$pattern")"
     if [ -n "$url" ]; then
-      download "$url" "$TMP/professor-os.deb"
+      download "$url" "$TMP/suk.deb"
       step "Installing the package (you may be asked for your password)…"
-      chmod 644 "$TMP/professor-os.deb"
-      sudo_cmd apt-get install -y "$TMP/professor-os.deb" || fail "The package couldn't be installed."
+      chmod 644 "$TMP/suk.deb"
+      sudo_cmd apt-get install -y "$TMP/suk.deb" || fail "The package couldn't be installed."
       bold "Installed $APP_NAME."
-      echo "Start it from your applications menu, or run: professor-os"
+      echo "Start it from your applications menu, or run: suk"
       return
     fi
   fi
@@ -146,15 +146,15 @@ install_linux() {
     case "$arch" in aarch64) pattern='\.aarch64\.rpm$' ;; x86_64) pattern='\.x86_64\.rpm$' ;; esac
     url="$(pick "$pattern")"
     if [ -n "$url" ]; then
-      download "$url" "$TMP/professor-os.rpm"
+      download "$url" "$TMP/suk.rpm"
       step "Installing the package (you may be asked for your password)…"
       if command -v dnf >/dev/null 2>&1; then
-        sudo_cmd dnf install -y "$TMP/professor-os.rpm" || fail "The package couldn't be installed."
+        sudo_cmd dnf install -y "$TMP/suk.rpm" || fail "The package couldn't be installed."
       else
-        sudo_cmd zypper --non-interactive install --allow-unsigned-rpm "$TMP/professor-os.rpm" || fail "The package couldn't be installed."
+        sudo_cmd zypper --non-interactive install --allow-unsigned-rpm "$TMP/suk.rpm" || fail "The package couldn't be installed."
       fi
       bold "Installed $APP_NAME."
-      echo "Start it from your applications menu, or run: professor-os"
+      echo "Start it from your applications menu, or run: suk"
       return
     fi
   fi
@@ -164,13 +164,13 @@ install_linux() {
 case "$os" in
   Darwin) install_macos ;;
   Linux) install_linux ;;
-  *) fail "Professor OS runs on macOS and Linux; this is $os." ;;
+  *) fail "Suk runs on macOS and Linux; this is $os." ;;
 esac
 
 echo
 if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ] || command -v codex >/dev/null 2>&1 || [ -x "$HOME/.local/bin/codex" ]; then
   echo "When it opens, choose the assistant you use and you're ready."
 else
-  echo "Professor OS runs through Claude Code or Codex. When it opens, it will help you"
+  echo "Suk runs through Claude Code or Codex. When it opens, it will help you"
   echo "install one and sign in. You'll need a Claude or ChatGPT plan."
 fi

@@ -3,7 +3,7 @@
 //! Everything is stored as `Entity` nodes joined by `Link` relationships. Both carry a `kind`
 //! validated against the lists below, so adding a type or relationship needs no schema migration.
 //! Details such as a student's email or a task's due date live in each entity's `info` map; the
-//! professor's own writing lives in `notes`, and free-form groupings in `tags`.
+//! user's own writing lives in `notes`, and free-form groupings in `tags`.
 //!
 //! Chat messages are stored too, linked to the entities they were about, so every page can show
 //! the conversations behind it. Sidebar sections are views over tags.
@@ -18,7 +18,7 @@ use lbug::{Connection, Database, SystemConfig, Value};
 use serde::Serialize;
 
 pub const ENTITY_KINDS: &[&str] = &[
-    // Anyone: students, collaborators, colleagues. How they relate to the professor is a role.
+    // Anyone: students, collaborators, colleagues. How they relate to the user is a role.
     "Person",
     "Project",
     "Course",
@@ -27,7 +27,7 @@ pub const ENTITY_KINDS: &[&str] = &[
     "Document",
     "Event",
     "ResearchArea",
-    // A free-standing page the professor writes, like an Obsidian note.
+    // A free-standing page the user writes, like an Obsidian note.
     "Note",
     // A university, department, lab, company or funding agency.
     "Organization",
@@ -49,7 +49,7 @@ pub const RELATION_KINDS: &[&str] = &[
     "LINKS_TO",
     // From a task to the person it is for ("Review Satya's survey").
     "FOR",
-    // From a task to the person the professor is waiting on ("Kavya's comments on the draft").
+    // From a task to the person the user is waiting on ("Kavya's comments on the draft").
     "WAITING_ON",
     // From a task to each person who is to do it ("Rohan presents the state of the art").
     "ASSIGNED_TO",
@@ -62,7 +62,7 @@ pub const RELATION_KINDS: &[&str] = &[
     "PART_OF",
 ];
 
-/// How a person is connected to the professor, stored as tags; a person can have several.
+/// How a person is connected to the user, stored as tags; a person can have several.
 pub const ROLES: &[&str] = &["student", "collaborator", "colleague", "faculty", "staff", "alumni"];
 
 /// Kinds accepted as input that are stored as another kind with a role: a Student is a Person
@@ -119,7 +119,7 @@ const SCHEMA: &[&str] = &[
     "ALTER TABLE Link ADD IF NOT EXISTS detail STRING",
     "ALTER TABLE Link ADD IF NOT EXISTS since STRING",
     "ALTER TABLE Link ADD IF NOT EXISTS until STRING",
-    // Things people the professor follows did: new papers, homepage changes, feed posts.
+    // Things people the user follows did: new papers, homepage changes, feed posts.
     "CREATE NODE TABLE IF NOT EXISTS Activity(id STRING, person STRING, source STRING, kind STRING, title STRING, url STRING, summary STRING, published STRING, found_at INT64, baseline BOOLEAN, relevance STRING, reason STRING, related STRING, seen BOOLEAN, notified BOOLEAN, PRIMARY KEY(id))",
     // What was last seen at a watched source (a homepage's text), and when it was checked.
     "CREATE NODE TABLE IF NOT EXISTS SourceState(key STRING, value STRING, checked_at INT64, PRIMARY KEY(key))",
@@ -146,7 +146,7 @@ pub struct Activity {
     /// "high", "medium", "low" or "none" once judged; empty until then.
     pub relevance: String,
     pub reason: String,
-    /// Names of the professor's pages it relates to.
+    /// Names of the user's pages it relates to.
     pub related: Vec<String>,
     pub seen: bool,
     pub notified: bool,
@@ -239,7 +239,7 @@ pub fn check_icon(value: &str) -> Result<String, GraphError> {
 /// Where a project stands, as stored in its status.
 pub const PROJECT_STATUSES: &[&str] = &["planned", "in-progress", "completed"];
 
-/// A project status in its stored form, from what the professor or Obsidian may write
+/// A project status in its stored form, from what the user or Obsidian may write
 /// ("In progress", "active", "done").
 pub fn project_status(value: &str) -> Option<&'static str> {
     let words = value.trim().to_lowercase().replace(['_', '-'], " ");
@@ -308,7 +308,7 @@ pub struct TaskQuery {
     /// Only tasks linked to this entity: assigned to, for or waiting on a person, or part of a
     /// project/course.
     pub linked_to: Option<String>,
-    /// Only tasks assigned to someone (true), or only the professor's own (false).
+    /// Only tasks assigned to someone (true), or only the user's own (false).
     pub assigned: Option<bool>,
 }
 
@@ -354,9 +354,9 @@ pub struct Entity {
     pub name: String,
     /// Details by lowercase key, e.g. "email", "due", "priority".
     pub info: BTreeMap<String, String>,
-    /// Lowercase tags the professor or Claude added; the kind's own tag is implied, not stored.
+    /// Lowercase tags the user or Claude added; the kind's own tag is implied, not stored.
     pub tags: Vec<String>,
-    /// Markdown the professor writes on the entity's page.
+    /// Markdown the user writes on the entity's page.
     pub notes: String,
     /// Milliseconds since the epoch of the last change to info, tags or notes; 0 if never.
     pub updated_at: i64,
@@ -704,13 +704,17 @@ impl Graph {
             }
             None => "MATCH (e:Entity)",
         };
+        // Sorted on plain text and number keys: ordering on NULLs and booleans came out
+        // inconsistently between runs.
         let conn = Connection::new(&self.db)?;
         let mut stmt = conn.prepare(&format!(
             "{pattern} WHERE {} \
              WITH DISTINCT e \
-             RETURN {}, e.due_date IS NULL AS undated, \
+             RETURN {}, \
+               CASE WHEN e.due_date IS NULL THEN '9999-12-31' ELSE string(e.due_date) END AS due_key, \
+               CASE WHEN e.due_time IS NULL THEN '99:99' ELSE e.due_time END AS time_key, \
                CASE e.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END AS rank \
-             ORDER BY undated, e.due_date, e.due_time, rank, lower(e.name)",
+             ORDER BY due_key, time_key, rank, lower(e.name)",
             conditions.join(" AND "),
             fields("e")
         ))?;
@@ -980,7 +984,7 @@ impl Graph {
             .collect())
     }
 
-    /// Records how relevant an activity is to the professor's work, and why.
+    /// Records how relevant an activity is to the user's work, and why.
     /// Stores how relevant an activity is; false if there is no such activity.
     pub fn judge_activity(&self, id: &str, relevance: &str, reason: &str, related: &[String]) -> Result<bool, GraphError> {
         if !["high", "medium", "low", "none"].contains(&relevance) {
@@ -2020,7 +2024,7 @@ mod tests {
     }
 
     #[test]
-    fn tasks_assigned_to_people_are_told_apart_from_the_professors_own() {
+    fn tasks_assigned_to_people_are_told_apart_from_the_users_own() {
         let g = Graph::in_memory().unwrap();
         let rohan = g.upsert_entity("Student", "Rohan Das").unwrap();
         let kabir = g.upsert_entity("Student", "Kabir Mehta").unwrap();
@@ -2033,16 +2037,16 @@ mod tests {
         let names = |q: TaskQuery| -> Vec<String> { g.tasks(&q).unwrap().into_iter().map(|t| t.name).collect() };
         assert_eq!(names(TaskQuery { assigned: Some(true), ..Default::default() }), vec!["Present state of the art on Solidity Compiler Fuzzing"]);
         assert_eq!(names(TaskQuery { assigned: Some(false), ..Default::default() }), vec!["Review Rohan's slides"]);
-        // On Rohan's page: what he's assigned and what the professor owes him.
+        // On Rohan's page: what he's assigned and what the user owes him.
         assert_eq!(names(TaskQuery { linked_to: Some(rohan.id.clone()), ..Default::default() }).len(), 2);
         assert_eq!(names(TaskQuery { linked_to: Some(kabir.id.clone()), ..Default::default() }), vec!["Present state of the art on Solidity Compiler Fuzzing"]);
     }
 
     #[test]
     fn task_details_saved_as_json_by_earlier_releases_move_to_columns() {
-        let dir = std::env::temp_dir().join(format!("professor-os-columns-{}", now_ms()));
+        let dir = std::env::temp_dir().join(format!("suk-columns-{}", now_ms()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("professor.lbdb");
+        let path = dir.join("suk.lbdb");
         {
             let g = Graph::open(&path).unwrap();
             let conn = Connection::new(&g.db).unwrap();
@@ -2062,9 +2066,9 @@ mod tests {
 
     #[test]
     fn students_from_earlier_releases_become_people_with_the_role() {
-        let dir = std::env::temp_dir().join(format!("professor-os-migrate-{}", now_ms()));
+        let dir = std::env::temp_dir().join(format!("suk-migrate-{}", now_ms()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("professor.lbdb");
+        let path = dir.join("suk.lbdb");
         {
             let g = Graph::open(&path).unwrap();
             let conn = Connection::new(&g.db).unwrap();
@@ -2203,11 +2207,11 @@ mod tests {
     }
 
     /// Prints every entity and outgoing link in a database. Use a copy, not the live file:
-    /// `PROFESSOR_OS_DB=/path/copy/professor.lbdb cargo test --lib dump_graph -- --ignored --nocapture`
+    /// `SUK_DB=/path/copy/suk.lbdb cargo test --lib dump_graph -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn dump_graph() {
-        let g = Graph::open(std::env::var("PROFESSOR_OS_DB").expect("set PROFESSOR_OS_DB")).unwrap();
+        let g = Graph::open(std::env::var("SUK_DB").expect("set SUK_DB")).unwrap();
         for kind in ENTITY_KINDS {
             for e in g.entities_of_kind(kind).unwrap() {
                 println!("{kind:<12} {} {:?} {:?} notes:{}", e.name, e.info, e.tags, e.notes.len());
@@ -2220,11 +2224,11 @@ mod tests {
 
     /// Prints the messages about a page (all chats), or without PAGE the main chat's latest, from a
     /// copy of a database:
-    /// `PROFESSOR_OS_DB=/path/copy/professor.lbdb PAGE=person:x cargo test --lib dump_messages -- --ignored --nocapture`
+    /// `SUK_DB=/path/copy/suk.lbdb PAGE=person:x cargo test --lib dump_messages -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn dump_messages() {
-        let g = Graph::open(std::env::var("PROFESSOR_OS_DB").expect("set PROFESSOR_OS_DB")).unwrap();
+        let g = Graph::open(std::env::var("SUK_DB").expect("set SUK_DB")).unwrap();
         let messages = match std::env::var("PAGE") {
             Ok(page) => g.messages_about(&page, 50).unwrap(),
             Err(_) => g.recent_messages(40).unwrap(),
@@ -2236,9 +2240,9 @@ mod tests {
 
     #[test]
     fn data_persists_across_reopen() {
-        let dir = std::env::temp_dir().join(format!("professor-os-test-{}", now_ms()));
+        let dir = std::env::temp_dir().join(format!("suk-test-{}", now_ms()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("professor.lbdb");
+        let path = dir.join("suk.lbdb");
         {
             let g = Graph::open(&path).unwrap();
             let rahul = g.upsert_entity("Student", "Rahul").unwrap();

@@ -26,7 +26,7 @@ const RELEVANCE: Record<string, string> = {
   none: "Not related",
 };
 
-/** One paper, post or page change, with why it matters to the professor's work. */
+/** One paper, post or page change, with why it matters to the user's work. */
 function UpdateItem({ activity: a, person, fresh, onOpen, onError }: Props) {
   const kind = KIND[a.kind] ?? KIND.post;
   // Related pages are stored by name; open the page with exactly that name.

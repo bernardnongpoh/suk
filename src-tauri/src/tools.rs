@@ -2,7 +2,7 @@
 //! outside tools (Google Calendar) it may use.
 //!
 //! Claude never touches the database directly: every tool validates its input and goes through
-//! `Graph`. Calendar events are only created for items the professor confirmed in the UI; that is
+//! `Graph`. Calendar events are only created for items the user confirmed in the UI; that is
 //! enforced here, not left to the prompt.
 
 use std::collections::BTreeMap;
@@ -21,8 +21,8 @@ use crate::watch;
 
 /// The Google Calendar connector's tools, as Claude Code names them.
 pub const CALENDAR_PREFIX: &str = "mcp__claude_ai_Google_Calendar__";
-/// Name of this app's MCP server in the Claude Code config; tools become `mcp__professor__<tool>`.
-pub const SERVER_NAME: &str = "professor";
+/// Name of this app's MCP server in the Claude Code config; tools become `mcp__suk__<tool>`.
+pub const SERVER_NAME: &str = "suk";
 /// The tool Claude Code asks before using any tool that isn't pre-approved.
 pub const APPROVE_TOOL: &str = "approve";
 const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M";
@@ -170,7 +170,7 @@ impl Proposals {
 #[derive(Default)]
 pub struct Activity {
     inner: Mutex<(Vec<String>, Vec<(String, String)>)>,
-    /// Links the professor gave in the current turn; only these can be read.
+    /// Links the user gave in the current turn; only these can be read.
     links: Mutex<Vec<String>>,
     /// Lets tests read pages served on this computer.
     #[cfg(test)]
@@ -259,20 +259,20 @@ pub fn definitions() -> Value {
         },
         {
             "name": "tasks",
-            "description": "Tasks, soonest due first then by priority, each with who it is assigned to (empty means the professor's own), who it is for, who the professor is waiting on, and its project or course.",
+            "description": "Tasks, soonest due first then by priority, each with who it is assigned to (empty means the user's own), who it is for, who the user is waiting on, and its project or course.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "status": { "enum": ["open", "done", "all"], "description": "Default open." },
                     "due_by": { "type": "string", "description": "Only tasks due on or before this date, YYYY-MM-DD." },
                     "about": { "type": "string", "description": "Only tasks linked to this person, project or course, by name." },
-                    "assigned": { "enum": ["mine", "others", "all"], "description": "The professor's own tasks, tasks assigned to other people, or both. Default all." }
+                    "assigned": { "enum": ["mine", "others", "all"], "description": "The user's own tasks, tasks assigned to other people, or both. Default all." }
                 }
             }
         },
         {
             "name": "people_at",
-            "description": "Who the professor knows at an organization, including its departments and labs: each person with their position or degree, dates, and roles. Accepts other names (IITG).",
+            "description": "Who the user knows at an organization, including its departments and labs: each person with their position or degree, dates, and roles. Accepts other names (IITG).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -285,7 +285,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "save",
-            "description": "Create an entity, or update the details, roles and tags of an existing one with the same name. Everyone (students, collaborators, colleagues) is a Person; how they relate to the professor goes in roles. Details merge with what is stored; set a detail to null to remove it. Roles and tags are added. Returns the stored entity.",
+            "description": "Create an entity, or update the details, roles and tags of an existing one with the same name. Everyone (students, collaborators, colleagues) is a Person; how they relate to the user goes in roles. Details merge with what is stored; set a detail to null to remove it. Roles and tags are added. Returns the stored entity.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -298,7 +298,7 @@ pub fn definitions() -> Value {
                     },
                     "roles": {
                         "type": "array",
-                        "description": "For a Person: how they are connected to the professor.",
+                        "description": "For a Person: how they are connected to the user.",
                         "items": { "enum": ROLES }
                     },
                     "aliases": {
@@ -374,13 +374,13 @@ pub fn definitions() -> Value {
         },
         {
             "name": "follow",
-            "description": "Follow a person so the app checks their new papers (OpenAlex), homepage changes and feeds (blog, GitHub) in the background and notifies the professor about what relates to their work. Also stores profile links the professor pasted (homepage, X/Twitter, LinkedIn, Google Scholar, GitHub, DBLP, ORCID, OpenAlex) under the right details. X, LinkedIn and Google Scholar links are kept but can't be checked. Returns what will be checked and, when papers can't be checked yet, OpenAlex authors who might be this person.",
+            "description": "Follow a person so the app checks their new papers (OpenAlex), homepage changes and feeds (blog, GitHub) in the background and notifies the user about what relates to their work. Also stores profile links the user pasted (homepage, X/Twitter, LinkedIn, Google Scholar, GitHub, DBLP, ORCID, OpenAlex) under the right details. X, LinkedIn and Google Scholar links are kept but can't be checked. Returns what will be checked and, when papers can't be checked yet, OpenAlex authors who might be this person.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "name": { "type": "string", "minLength": 1 },
-                    "links": { "type": "array", "items": { "type": "string" }, "description": "Profile links from the professor's message." },
-                    "openalex": { "type": "string", "description": "The OpenAlex author id (A…) the professor confirmed is this person." },
+                    "links": { "type": "array", "items": { "type": "string" }, "description": "Profile links from the user's message." },
+                    "openalex": { "type": "string", "description": "The OpenAlex author id (A…) the user confirmed is this person." },
                     "follow": { "type": "boolean", "description": "false to stop following. Default true." }
                 },
                 "required": ["name"]
@@ -388,7 +388,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "updates",
-            "description": "Recent papers, posts and homepage changes from people the professor follows, newest first, with how relevant each is to the professor's work and why.",
+            "description": "Recent papers, posts and homepage changes from people the user follows, newest first, with how relevant each is to the user's work and why.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -412,7 +412,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "read_link",
-            "description": "Read a web page the professor pasted in their message, such as a student's or collaborator's profile, and get its title, email addresses and text. Only links from the professor's message can be read.",
+            "description": "Read a web page the user pasted in their message, such as a student's or collaborator's profile, and get its title, email addresses and text. Only links from the user's message can be read.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "url": { "type": "string" } },
@@ -421,7 +421,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "suggest_section",
-            "description": "Offer the professor a sidebar section listing everything with a tag, for a grouping they will keep coming back to (a committee, a grant, a reading group). The app already offers sections for students, people, projects and courses by itself.",
+            "description": "Offer the user a sidebar section listing everything with a tag, for a grouping they will keep coming back to (a committee, a grant, a reading group). The app already offers sections for students, people, projects and courses by itself.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -433,7 +433,7 @@ pub fn definitions() -> Value {
         },
         {
             "name": "propose_schedule",
-            "description": "Show the professor time blocks to put on their calendar. The app displays them with checkboxes and a Confirm button. Nothing is added until they confirm; the app then tells you which items to add.",
+            "description": "Show the user time blocks to put on their calendar. The app displays them with checkboxes and a Confirm button. Nothing is added until they confirm; the app then tells you which items to add.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -487,7 +487,7 @@ pub fn call(ctx: &Ctx, name: &str, args: Value) -> Result<String, String> {
         "read_link" => {
             let args: LinkReadArgs = parse(args)?;
             if !ctx.activity.link_allowed(&args.url) {
-                return Err("Only links the professor pasted in this message can be read.".into());
+                return Err("Only links the user pasted in this message can be read.".into());
             }
             let page = crate::links::read(&args.url, ctx.activity.local_links())?;
             Ok(serde_json::to_string(&page).map_err(|e| e.to_string())?)
@@ -497,7 +497,7 @@ pub fn call(ctx: &Ctx, name: &str, args: Value) -> Result<String, String> {
         "suggest_section" => {
             let args: SectionArgs = parse(args)?;
             ctx.activity.suggest(&args.tag, &args.title);
-            Ok("The app will offer the professor this section below your reply. Don't mention it.".into())
+            Ok("The app will offer the user this section below your reply. Don't mention it.".into())
         }
         "propose_schedule" => propose(ctx.proposals, parse(args)?),
         APPROVE_TOOL => Ok(approve(ctx.proposals, parse(args)?).to_string()),
@@ -720,10 +720,10 @@ struct SaveArgs {
     aliases: Vec<String>,
 }
 
-/// The professor and email addresses are not entities; the model once saved the professor by email.
+/// The user and email addresses are not entities; the model once saved the user by email.
 fn check_name(name: &str) -> Result<(), String> {
     if name.contains('@') {
-        return Err(format!("\"{name}\" is not a name. The professor is never saved, and emails go in info"));
+        return Err(format!("\"{name}\" is not a name. The user is never saved, and emails go in info"));
     }
     Ok(())
 }
@@ -973,7 +973,7 @@ fn follow(ctx: &Ctx, args: FollowArgs) -> Result<String, String> {
     let follow = args.follow.unwrap_or(true);
     for url in &args.links {
         if !ctx.activity.link_allowed(url) {
-            return Err(format!("{url} isn't in the professor's message; only save links they gave"));
+            return Err(format!("{url} isn't in the user's message; only save links they gave"));
         }
         if !ctx.activity.local_links() {
             crate::links::check_public(url)?;
@@ -1006,7 +1006,7 @@ fn follow(ctx: &Ctx, args: FollowArgs) -> Result<String, String> {
         match watch::author_candidates(ctx.fetch, &name) {
             Ok(candidates) if !candidates.is_empty() => {
                 result["openalex_candidates"] = json!(candidates);
-                result["next"] = "Papers can't be checked until the right OpenAlex author is chosen. Ask the professor which one it is and wait for the answer, unless exactly one candidate's institution matches an affiliation the professor gave or that is saved for this person (not your own knowledge). Then call follow again with openalex.".into();
+                result["next"] = "Papers can't be checked until the right OpenAlex author is chosen. Ask the user which one it is and wait for the answer, unless exactly one candidate's institution matches an affiliation the user gave or that is saved for this person (not your own knowledge). Then call follow again with openalex.".into();
             }
             Ok(_) => result["papers"] = "No OpenAlex author found under this name, so papers won't be checked.".into(),
             Err(e) => result["papers"] = format!("Couldn't look up their papers: {e}").into(),
@@ -1118,17 +1118,17 @@ fn approve(proposals: &Proposals, args: ApproveArgs) -> Value {
     let allow = || json!({ "behavior": "allow", "updatedInput": args.input });
     let Some(action) = args.tool_name.strip_prefix(CALENDAR_PREFIX) else {
         eprintln!("claude: denied {}", args.tool_name);
-        return deny("Professor OS only allows its own tools and reading Google Calendar.");
+        return deny("Suk only allows its own tools and reading Google Calendar.");
     };
     match calendar_access(action) {
         CalendarAccess::Read => allow(),
         CalendarAccess::Create if proposals.confirmed_item_for(&args.input).is_some() => allow(),
         CalendarAccess::Create => deny(
-            "Only items the professor confirmed can be added, using their exact title and start time. Use propose_schedule first.",
+            "Only items the user confirmed can be added, using their exact title and start time. Use propose_schedule first.",
         ),
         CalendarAccess::Other => {
             eprintln!("claude: denied {}", args.tool_name);
-            deny("Professor OS doesn't allow changing or deleting calendar events.")
+            deny("Suk doesn't allow changing or deleting calendar events.")
         }
     }
 }
@@ -1279,7 +1279,7 @@ mod tests {
         assert_eq!(result["not_checkable"], json!(["X"]));
         assert_eq!(result["openalex_candidates"][0]["id"], "A5051672229");
         assert_eq!(result["openalex_candidates"][1]["institutions"][0], "Roche (Switzerland)");
-        assert!(result["next"].as_str().unwrap().contains("Ask the professor which one"));
+        assert!(result["next"].as_str().unwrap().contains("Ask the user which one"));
         let person = g.find_by_name("Andreas Zeller").unwrap().unwrap();
         assert_eq!((person.info["twitter"].as_str(), person.info["homepage"].as_str()), (x, home));
         assert!(a.take().0.contains(&person.id));
@@ -1359,9 +1359,9 @@ mod tests {
         assert!(names.contains(&"add_note".to_string()) && names.contains(&"suggest_section".to_string()));
         assert!(!definitions().to_string().contains("LINKS_TO"));
 
-        // Links: only those the professor gave in this turn.
+        // Links: only those the user gave in this turn.
         let err = run_with(&g, &p, &a, "read_link", json!({"url": "https://example.org/profile"})).unwrap_err();
-        assert!(err.contains("Only links the professor pasted"));
+        assert!(err.contains("Only links the user pasted"));
         a.begin(vec!["http://127.0.0.1:9/profile/".into()]);
         let err = run_with(&g, &p, &a, "read_link", json!({"url": "http://127.0.0.1:9/profile"})).unwrap_err();
         assert!(err.contains("this computer"), "{err}");
@@ -1494,8 +1494,8 @@ mod tests {
         let wrong = run(&g, &p, "link", json!({"from": "Grade exams", "relation": "SUPERVISES", "to": "Bo", "to_type": "Student"}));
         assert!(wrong.unwrap_err().contains("can't go from a Task"));
         assert!(run(&g, &p, "drop_database", json!({})).is_err());
-        let professor = run(&g, &p, "link", json!({"from": "prof@example.edu", "from_type": "Person", "relation": "SUPERVISES", "to": "Bo", "to_type": "Student"}));
-        assert!(professor.unwrap_err().contains("never saved"));
+        let the_user = run(&g, &p, "link", json!({"from": "prof@example.edu", "from_type": "Person", "relation": "SUPERVISES", "to": "Bo", "to_type": "Student"}));
+        assert!(the_user.unwrap_err().contains("never saved"));
         assert!(g.find_by_name("prof@example.edu").unwrap().is_none());
     }
 

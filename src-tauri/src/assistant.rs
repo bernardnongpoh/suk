@@ -364,7 +364,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// [App] notes to pass to the assistant with the professor's next message, whichever it is.
+/// [App] notes to pass to the assistant with the user's next message, whichever it is.
 #[derive(Default)]
 pub struct Notes(Mutex<Vec<String>>);
 
@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn settings_round_trip_and_ignore_old_keys() {
-        let dir = std::env::temp_dir().join(format!("professor-os-settings-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("suk-settings-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(SETTINGS_FILE), r#"{ "model": null }"#).unwrap();
         assert_eq!(Settings::load(&dir), Settings::default());
@@ -436,8 +436,8 @@ mod tests {
     #[test]
     fn notes_go_before_the_next_message_once() {
         let notes = Notes::default();
-        notes.add("[App] The professor ticked off a task.".into());
-        assert_eq!(notes.with_message("Hi"), "[App] The professor ticked off a task.\nHi");
+        notes.add("[App] The user ticked off a task.".into());
+        assert_eq!(notes.with_message("Hi"), "[App] The user ticked off a task.\nHi");
         assert_eq!(notes.with_message("Again"), "Again");
     }
 
@@ -447,7 +447,7 @@ mod tests {
     #[test]
     #[ignore]
     fn real_claude_sign_in_prompt_and_cancel() {
-        let config = std::env::temp_dir().join(format!("professor-os-claude-login-{}", std::process::id()));
+        let config = std::env::temp_dir().join(format!("suk-claude-login-{}", std::process::id()));
         std::fs::create_dir_all(&config).unwrap();
         // Only this test runs in the process when invoked as documented.
         std::env::set_var("CLAUDE_CONFIG_DIR", &config);
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn a_missing_program_is_not_installed() {
-        assert!(find_program("professor-os-no-such-tool").is_none());
+        assert!(find_program("suk-no-such-tool").is_none());
         assert!(find_program("sh").is_some());
     }
 }

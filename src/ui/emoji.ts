@@ -53,7 +53,7 @@ export function searchEmoji(all: Emoji[], query: string) {
     .map(([e]) => e);
 }
 
-/** Icons for subjects a professor's pages are often about, matched on word starts. */
+/** Icons for subjects people's pages are often about, matched on word starts. */
 const SUBJECTS: [string[], string[]][] = [
   [["fuzz"], ["🐛", "🎲", "🧪"]],
   [["bug", "debug"], ["🐞", "🔍"]],
@@ -145,7 +145,7 @@ export function suggestIcons(
   return found.slice(0, max);
 }
 
-const RECENT_KEY = "professor-os.recent-icons";
+const RECENT_KEY = "suk.recent-icons";
 
 export function recentIcons(): string[] {
   try {

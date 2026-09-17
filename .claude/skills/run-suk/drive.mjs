@@ -1,4 +1,4 @@
-// Drives the Professor OS frontend over the Chrome DevTools Protocol, against a fake backend.
+// Drives the Suk frontend over the Chrome DevTools Protocol, against a fake backend.
 // Usage: node drive.mjs [outDir]   (expects headless Chrome on port 9223 and Vite on 1420)
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -303,8 +303,8 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
           case "open_page": return byName(args.name) ?? put(args.kind ?? "Note", args.name);
           case "rename_page": db.entities[args.id].name = args.name; return db.entities[args.id];
           case "delete_page": delete db.entities[args.id]; return null;
-          case "get_vault": return { path: "/Users/prof/Documents/Professor OS", registered: true };
-          case "open_in_obsidian": case "open_url": return null;
+          case "get_vault": return { path: "/Users/prof/Documents/Suk", registered: true };
+          case "open_page_file": case "open_url": return null;
           case "unlinked_affiliations":
             return Object.values(db.entities)
               .filter((e) => e.kind === "Person" && e.info.affiliation && !db.links.some((l) => l.from === e.id && l.kind === "AFFILIATED_WITH"))

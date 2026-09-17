@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Professor OS",
+  "productName": "Suk",
   "version": "0.1.0",
-  "identifier": "com.professoros.app",
+  "identifier": "app.suk.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Professor OS",
+        "title": "Suk",
         "width": 1100,
         "height": 720,
         "minWidth": 640,
@@ -33,10 +33,10 @@
       "appimage"
     ],
     "category": "Productivity",
-    "shortDescription": "A calm place for a professor's students, research, teaching and admin.",
-    "longDescription": "Professor OS keeps track of your students, collaborators, projects, courses and tasks. Tell it what's going on in plain words; it organizes everything into pages, plans your day and follows researchers you care about. It runs on your computer and works through Claude Code or Codex.",
+    "shortDescription": "Tell it what's going on; it keeps your work in order.",
+    "longDescription": "Suk keeps track of the people you work with, your projects, tasks, ideas and notes. Tell it what's going on in plain words; it organizes everything into pages, plans your day and follows the people whose work you care about. Built with academics in mind. It runs on your computer, keeps your notes as Markdown files, and works through Claude Code or Codex.",
     "copyright": "© 2026 Bernard Nongpoh",
-    "homepage": "https://github.com/bernardnongpoh/professor-os",
+    "homepage": "https://github.com/bernardnongpoh/suk",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

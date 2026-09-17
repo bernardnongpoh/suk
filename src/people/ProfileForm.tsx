@@ -14,7 +14,7 @@ interface Props {
 }
 
 /**
- * Asks who a person is: how they're connected to the professor, and whatever details are still
+ * Asks who a person is: how they're connected to the user, and whatever details are still
  * missing. A profile link fills them in. Everything is optional.
  */
 function ProfileForm({ request, place, onChange, onOpen, onClose }: Props) {

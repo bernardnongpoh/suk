@@ -56,7 +56,7 @@ fn claude_conversation() {
     let graph = Arc::new(Graph::in_memory().unwrap());
     let proposals = Arc::new(Proposals::default());
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: Default::default() }).unwrap();
-    let workdir = std::env::temp_dir().join(format!("professor-os-claude-{}", std::process::id()));
+    let workdir = std::env::temp_dir().join(format!("suk-claude-{}", std::process::id()));
     let setup = Setup {
         binary: claude::find_binary().expect("claude not installed"),
         workdir: workdir.clone(),
@@ -89,7 +89,7 @@ fn claude_conversation() {
                 return Err(format!("Amit stored as {amit:?}"));
             }
             if g.entities_of_kind("Person").unwrap().iter().any(|p| p.name.contains('@')) {
-                return Err("saved the professor as a person".into());
+                return Err("saved the user as a person".into());
             }
             let works = g.links(&amit.id).unwrap().iter().any(|l| l.kind == "WORKS_ON" && l.other.name.to_lowercase().contains("static analysis"));
             works.then_some(()).ok_or("no WORKS_ON static analysis".into())
@@ -137,7 +137,7 @@ fn claude_conversation() {
         let confirmed = proposals.confirm(&p.id, &[0]).unwrap();
         tools::record_confirmed(&graph, &confirmed).unwrap();
         let message = format!(
-            "[App] The professor confirmed proposal {}. Add these to their Google Calendar now, with exactly these titles and local times:\n- \"{}\" from {} to {}\nThen reply in one short sentence.",
+            "[App] The user confirmed proposal {}. Add these to their Google Calendar now, with exactly these titles and local times:\n- \"{}\" from {} to {}\nThen reply in one short sentence.",
             p.id, p.items[0].title, p.items[0].start, p.items[0].end
         );
         let calendar = claude.calendar_status();
@@ -169,7 +169,7 @@ fn claude_conversation() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// The professor mentions a new student, fills in the details form, adds context, then finds the
+/// The user mentions a new student, fills in the details form, adds context, then finds the
 /// student with search and asks about him from his page. Checks what was stored, what the app
 /// offered, what Claude replied, and the page's file in the Obsidian vault.
 #[test]
@@ -182,7 +182,7 @@ fn claude_pages_and_focus() {
     let proposals = Arc::new(Proposals::default());
     let activity = Arc::new(tools::Activity::default());
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
-    let workdir = std::env::temp_dir().join(format!("professor-os-claude-pages-{}", std::process::id()));
+    let workdir = std::env::temp_dir().join(format!("suk-claude-pages-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
     let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
     let claude = Claude::default();
@@ -244,7 +244,7 @@ fn claude_pages_and_focus() {
         fail(step, "conversation not stored on Satya".into());
     }
 
-    // The professor adds the section and fills in the form (as the Add and Save buttons do).
+    // The user adds the section and fills in the form (as the Add and Save buttons do).
     graph.pin_section("student", "Students").unwrap();
     let satya = graph.find_by_name("Satya").unwrap().expect("Satya");
     let values: BTreeMap<String, Option<String>> = [
@@ -257,7 +257,7 @@ fn claude_pages_and_focus() {
     .map(|(k, v)| (k.to_string(), Some(v.to_string())))
     .collect();
     graph.update_info(&satya.id, &values).unwrap();
-    notes.add("[App] The professor filled in details for Satya in the app (already saved): full_name: Satya Prakash Das; email: satya.das@example.edu; program: PhD; relationship: PhD advisee.".into());
+    notes.add("[App] The user filled in details for Satya in the app (already saved): full_name: Satya Prakash Das; email: satya.das@example.edu; program: PhD; relationship: PhD advisee.".into());
 
     let step = "context";
     let (_, outcome) = say(
@@ -324,7 +324,7 @@ fn claude_pages_and_focus() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// People as the professor mentions them: details given in chat are filled in, a new name becomes
+/// People as the user mentions them: details given in chat are filled in, a new name becomes
 /// a person the app asks about, a pasted profile link fills in details, and a person picked while
 /// typing is used rather than duplicated.
 #[test]
@@ -355,7 +355,7 @@ fn claude_people() {
     let activity = Arc::new(tools::Activity::default());
     activity.allow_local_links.store(true, std::sync::atomic::Ordering::Relaxed);
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
-    let workdir = std::env::temp_dir().join(format!("professor-os-claude-people-{}", std::process::id()));
+    let workdir = std::env::temp_dir().join(format!("suk-claude-people-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
     let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
     let claude = Claude::default();
@@ -447,7 +447,7 @@ fn claude_people() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// Tasks as the professor mentions them: linked to the person they're for, the person being
+/// Tasks as the user mentions them: linked to the person they're for, the person being
 /// waited on, and their course; planning reads them from the database; ticking one off is seen.
 #[test]
 #[ignore]
@@ -459,7 +459,7 @@ fn claude_tasks() {
     let proposals = Arc::new(Proposals::default());
     let activity = Arc::new(tools::Activity::default());
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
-    let workdir = std::env::temp_dir().join(format!("professor-os-claude-tasks-{}", std::process::id()));
+    let workdir = std::env::temp_dir().join(format!("suk-claude-tasks-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
     let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
     let claude = Claude::default();
@@ -536,7 +536,7 @@ fn claude_tasks() {
     let step = "ticked off";
     if let Some(t) = task("survey") {
         graph.set_done(&t.id, true).unwrap();
-        notes.add(format!("[App] The professor marked done the task \"{}\".", t.name));
+        notes.add(format!("[App] The user marked done the task \"{}\".", t.name));
     }
     let reply = say("Is there anything I still owe Satya?");
     if reply.contains("survey") && !(reply.contains("done") || reply.contains("finished") || reply.contains("completed") || reply.contains("nothing") || reply.contains("no open")) {
@@ -560,7 +560,7 @@ fn claude_rename() {
     let proposals = Arc::new(Proposals::default());
     let activity = Arc::new(tools::Activity::default());
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
-    let workdir = std::env::temp_dir().join(format!("professor-os-claude-rename-{}", std::process::id()));
+    let workdir = std::env::temp_dir().join(format!("suk-claude-rename-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
     let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
     let claude = Claude::default();
@@ -590,7 +590,7 @@ fn claude_rename() {
     assert!(after.tags.contains(&"student".to_string()));
 }
 
-/// Organizations as the professor talks about them: one page per institution whatever it's
+/// Organizations as the user talks about them: one page per institution whatever it's
 /// called, departments inside it, positions and dates on the links, moves kept as history, and
 /// "who do I know at IITG" answered through departments.
 #[test]
@@ -602,7 +602,7 @@ fn claude_organizations() {
     let proposals = Arc::new(Proposals::default());
     let activity = Arc::new(tools::Activity::default());
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
-    let workdir = std::env::temp_dir().join(format!("professor-os-claude-orgs-{}", std::process::id()));
+    let workdir = std::env::temp_dir().join(format!("suk-claude-orgs-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
     let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
     let claude = Claude::default();
@@ -699,7 +699,7 @@ fn claude_assigned_tasks() {
     let proposals = Arc::new(Proposals::default());
     let activity = Arc::new(tools::Activity::default());
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
-    let workdir = std::env::temp_dir().join(format!("professor-os-claude-assign-{}", std::process::id()));
+    let workdir = std::env::temp_dir().join(format!("suk-claude-assign-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
     let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
     let claude = Claude::default();
@@ -730,7 +730,7 @@ fn claude_assigned_tasks() {
         }
         None => failures.push("presentation not assigned".into()),
     }
-    if !mine.iter().any(|t| t.name.to_lowercase().contains("review")) { failures.push("the review isn't the professor's own task".into()); }
+    if !mine.iter().any(|t| t.name.to_lowercase().contains("review")) { failures.push("the review isn't the user's own task".into()); }
 
     let reply = say("What have I given Rohan to do?");
     if !reply.contains("state of the art") && !reply.contains("present") { failures.push("doesn't list the presentation".into()); }
@@ -739,7 +739,7 @@ fn claude_assigned_tasks() {
 }
 
 /// Following a researcher from pasted links, picking their OpenAlex author, a real check of their
-/// papers and homepage, and Claude judging new items against the professor's work.
+/// papers and homepage, and Claude judging new items against the user's work.
 /// Uses the network (OpenAlex, the homepage) as well as the Claude account.
 #[test]
 #[ignore]
@@ -757,7 +757,7 @@ fn claude_following() {
     let proposals = Arc::new(Proposals::default());
     let activity = Arc::new(tools::Activity::default());
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
-    let workdir = std::env::temp_dir().join(format!("professor-os-claude-follow-{}", std::process::id()));
+    let workdir = std::env::temp_dir().join(format!("suk-claude-follow-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
     let binary = claude::find_binary().expect("claude not installed");
     let setup = Setup { binary: binary.clone(), workdir: workdir.clone(), mcp: endpoint };
@@ -846,7 +846,7 @@ fn claude_following() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// Project statuses from how the professor talks about projects, and listing by status.
+/// Project statuses from how the user talks about projects, and listing by status.
 #[test]
 #[ignore]
 fn claude_project_status() {
@@ -856,7 +856,7 @@ fn claude_project_status() {
     let proposals = Arc::new(Proposals::default());
     let activity = Arc::new(tools::Activity::default());
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
-    let workdir = std::env::temp_dir().join(format!("professor-os-claude-status-{}", std::process::id()));
+    let workdir = std::env::temp_dir().join(format!("suk-claude-status-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
     let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
     let claude = Claude::default();
@@ -928,7 +928,7 @@ fn claude_corrections() {
         let graph = Arc::new(Graph::in_memory().unwrap());
         let activity = Arc::new(tools::Activity::default());
         let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: Default::default(), activity: activity.clone() }).unwrap();
-        let workdir = std::env::temp_dir().join(format!("professor-os-claude-{tag}-{}", std::process::id()));
+        let workdir = std::env::temp_dir().join(format!("suk-claude-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&workdir);
         let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
         (graph, activity, setup, Claude::default(), workdir)
