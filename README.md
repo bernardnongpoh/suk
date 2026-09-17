@@ -37,8 +37,7 @@ Or download the file for your computer from the [latest release](https://github.
 > without any warning. If you open the `.dmg` you downloaded instead, right-click Professor OS in
 > Applications and choose **Open** the first time.
 
-Requires macOS 13.3 or later, or a 64-bit Linux with WebKitGTK 4.1 (Ubuntu 22.04, Debian 12,
-Fedora 38 or later).
+Requires macOS 13.3 or later, or 64-bit Linux: Ubuntu 24.04, Debian 13, Fedora 40 or later.
 
 ## You need Claude Code or Codex
 

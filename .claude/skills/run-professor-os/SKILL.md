@@ -124,6 +124,24 @@ Read the transcript: tool calls, replies, and the final graph dump. The calendar
 the Google Calendar connector being authenticated (`claude`, then `/mcp`); the log prints its
 status (`needs-auth` means not connected).
 
+## 2d. Assistant setup and releases
+
+- First run shows `src/onboarding/Setup.tsx` until Claude Code or Codex is installed, signed in and
+  chosen (`settings.json` in the app data dir). `drive.mjs` walks it with `?setup=fresh`.
+- Real sign-in plumbing, without touching the real login:
+  `cargo test --lib real_claude_sign_in -- --ignored --nocapture` (empty CLAUDE_CONFIG_DIR).
+- Codex flags against the real CLI, signed out:
+  `CODEX_BIN=/path/to/codex cargo test --lib real_codex_accepts -- --ignored --nocapture`
+  (install one in the scratchpad with `npm i @openai/codex`).
+- Release build on macOS: `OPENSSL_DIR="$(scripts/static-openssl.sh)" npm run tauri build`, then
+  `otool -L` on `Contents/MacOS/professor-os` must show no `/opt/homebrew` paths. Smoke test with
+  `env -i HOME=<empty dir> PATH=/usr/bin:/bin "<app>/Contents/MacOS/professor-os"`: it prints
+  `mcp: tools…` and stays running.
+- Releases: push a `v*` tag; `.github/workflows/release.yml` builds macOS arm64/x64 and Linux
+  x86_64/arm64 into a draft release. Test Linux packages in Docker (`ubuntu:24.04`) before
+  publishing. `git push` may pick up another account's credentials; use
+  `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push`.
+
 ## 3. Clean up
 
 ```bash
