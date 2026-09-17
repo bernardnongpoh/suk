@@ -1,10 +1,11 @@
-# Type-checks the frontend and runs the Rust tests on every push and pull request.
+# Type-checks the frontend and runs the Rust tests on the dev branch and on pull requests.
 name: Check
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
   pull_request:
+    branches: [main, dev]
 
 jobs:
   check:

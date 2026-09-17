@@ -120,5 +120,9 @@ npm run tauri dev                          # run it
 OPENSSL_DIR="$(scripts/static-openssl.sh)" npm run tauri build
 ```
 
-Releases are built by GitHub Actions when a `v*` tag is pushed
-(`.github/workflows/release.yml`).
+### Branches and releases
+
+- Work happens on **`dev`**; pushes there and pull requests run the tests.
+- **Merging into `main` releases** the version in `src-tauri/tauri.conf.json`: GitHub Actions builds
+  the macOS and Linux installers and publishes them. Bump the version first with
+  `scripts/bump-version.sh 0.1.1`; a version that's already released isn't rebuilt.

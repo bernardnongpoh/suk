@@ -1,17 +1,66 @@
-# Builds the installers for macOS and Linux when a version tag (v0.1.0) is pushed, and attaches
-# them to a draft GitHub release. Publish the release once every file is there.
+# Publishes a release when changes are merged into main. The version comes from
+# src-tauri/tauri.conf.json (bump it with scripts/bump-version.sh); a version that is already
+# released is skipped, so merges that don't bump it don't rebuild anything.
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      skip: ${{ steps.version.outputs.skip }}
+      release_id: ${{ steps.release.outputs.id }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          version="$(jq -r .version src-tauri/tauri.conf.json)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx false; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$version is already released. Bump the version (scripts/bump-version.sh) to release again."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create draft release
+        id: release
+        if: steps.version.outputs.skip == 'false'
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          # A draft left by an earlier failed run is replaced, so no stale files remain.
+          gh release delete "$tag" --yes 2>/dev/null || true
+          cat > notes.md <<NOTES
+          Install on macOS or Linux:
+
+              curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh
+
+          Or download the file for your computer below. On macOS, the app isn't signed yet: if you open the .dmg download, right-click the app and choose Open the first time.
+          NOTES
+          gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Suk $tag" --notes-file notes.md
+          id="$(gh api "repos/${{ github.repository }}/releases" --jq ".[] | select(.tag_name == \"$tag\") | .id" | head -1)"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
+    if: needs.prepare.outputs.skip == 'false'
     strategy:
       fail-fast: false
       matrix:
@@ -61,16 +110,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Suk ${{ github.ref_name }}
-          releaseBody: |
-            Install on macOS or Linux:
-
-                curl -fsSL https://raw.githubusercontent.com/bernardnongpoh/suk/main/install.sh | sh
-
-            Or download the file for your computer below. On macOS, the app isn't signed yet: if you open the .dmg download, right-click the app and choose Open the first time.
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.prepare.outputs.release_id }}
 
       - name: Check the macOS app doesn't depend on Homebrew
         if: runner.os == 'macOS'
@@ -81,3 +121,13 @@ jobs:
             echo "The app links a library from Homebrew" >&2
             exit 1
           fi
+
+  publish:
+    name: Publish release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Publish
+        run: gh release edit "v${{ needs.prepare.outputs.version }}" --repo "${{ github.repository }}" --draft=false --latest
