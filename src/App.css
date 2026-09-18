@@ -3661,3 +3661,55 @@ button.page-icon:hover {
   flex: 1;
   min-width: 260px;
 }
+
+/* Tidy up */
+
+.tidy-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tidy-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.tidy-main {
+  flex: 1;
+  min-width: 240px;
+}
+
+.tidy-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.tidy-title code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font: 600 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.tidy-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.button.danger-text {
+  color: var(--danger);
+}

@@ -62,12 +62,29 @@ fn chosen(app: &AppHandle) -> Option<Kind> {
 fn assistant_turn(app: &AppHandle, message: &str, on_status: &mut dyn FnMut(&str)) -> Result<Turn, String> {
     let kind = chosen(app).ok_or("No assistant is set up")?;
     let binary = assistant::find(kind).ok_or_else(|| format!("{} isn't installed", kind.label()))?;
-    let content = app.state::<Notes>().with_message(message);
+    let mut content = app.state::<Notes>().with_message(message);
     let mcp = app.state::<Endpoint>().inner().clone();
     let dir = data_dir(app)?;
+    // A new session (each day, or when the conversation grows long) starts with a short summary of
+    // the last messages instead of re-reading the whole history.
+    let brief = || pages::recent_brief(&app.state::<Graph>()).unwrap_or_default();
     match kind {
-        Kind::Claude => app.state::<Claude>().send(&claude::Setup { binary, workdir: dir.join("claude"), mcp }, &content, on_status),
-        Kind::Codex => app.state::<Codex>().send(&codex::Setup { binary, workdir: dir.join("codex"), mcp }, &content, on_status),
+        Kind::Claude => {
+            let setup = claude::Setup { binary, workdir: dir.join("claude"), mcp };
+            let claude = app.state::<Claude>();
+            if claude.begins_fresh(&setup) {
+                content = format!("{}{content}", brief());
+            }
+            claude.send(&setup, &content, on_status)
+        }
+        Kind::Codex => {
+            let setup = codex::Setup { binary, workdir: dir.join("codex"), mcp };
+            let codex = app.state::<Codex>();
+            if codex.begins_fresh(&setup) {
+                content = format!("{}{content}", brief());
+            }
+            codex.send(&setup, &content, on_status)
+        }
     }
 }
 

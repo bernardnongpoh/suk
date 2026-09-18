@@ -428,3 +428,47 @@ export const setFavorite = (id: string, favorite: boolean) => invoke<Entity>("se
 /** Edits a page's details: a string sets one, null removes it. */
 export const updateDetails = (id: string, changes: Record<string, string | null>) =>
   invoke<Entity>("update_details", { id, changes });
+
+/** A relationship or page type Suk started using, waiting to be kept, renamed or removed. */
+export interface NewType {
+  name: string;
+  /** How it reads on a page: "reviews", "Grant". */
+  label: string;
+  count: number;
+  /** A few examples: sentences for relationships, page names for types. */
+  examples: string[];
+}
+
+/** Two pages that may be the same thing. */
+export interface DuplicatePair {
+  keep: Entity;
+  remove: Entity;
+  /** Why they look alike, e.g. "Satya is part of Satya Das". */
+  reason: string;
+}
+
+export interface TidyItems {
+  relations: NewType[];
+  kinds: NewType[];
+  duplicates: DuplicatePair[];
+  /** Everything above, for the sidebar count. */
+  count: number;
+}
+
+export const tidyItems = () => invoke<TidyItems>("tidy_items");
+
+/** Keeps a new relationship or page type as it is, so it stops being offered for tidying. */
+export const keepType = (what: "relation" | "kind", name: string) => invoke<void>("keep_type", { what, name });
+
+/** Renames a type everywhere, or merges it into an existing one by giving that name. */
+export const renameType = (what: "relation" | "kind", name: string, newName: string) =>
+  invoke<void>("rename_type", { what, name, newName });
+
+/** Removes a relationship type: the relationships of that kind are deleted (pages stay). */
+export const removeRelationType = (name: string) => invoke<void>("remove_relation_type", { name });
+
+/** Merges two pages into one, keeping everything both had. */
+export const mergePages = (keep: string, remove: string) => invoke<Entity>("merge_pages", { keep, remove });
+
+/** Marks two pages as different, so they're not offered as duplicates again. */
+export const notDuplicates = (a: string, b: string) => invoke<void>("not_duplicates", { a, b });

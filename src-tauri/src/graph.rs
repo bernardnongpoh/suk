@@ -75,12 +75,37 @@ pub const INPUT_KINDS: &[&str] = &[
     "Organization",
 ];
 
-/// The stored kind for a kind name, and the role it implies, if the name is known.
-pub fn resolve_kind(kind: &str) -> Option<(&'static str, Option<&'static str>)> {
+/// Whether a name can be a new kind of page ("Grant", "Paper"): one or more capitalized words,
+/// written together or spaced, and not a relationship name.
+pub fn is_kind_name(kind: &str) -> bool {
+    let kind = kind.trim();
+    (3..=40).contains(&kind.chars().count())
+        && kind.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && kind.chars().all(|c| c.is_ascii_alphabetic() || c == ' ')
+        && kind.split_whitespace().all(|word| word.chars().next().is_some_and(|c| c.is_ascii_uppercase()))
+}
+
+/// Whether a name can be a new kind of relationship: WORKS_ON, REVIEWS.
+pub fn is_relation_name(kind: &str) -> bool {
+    (3..=40).contains(&kind.chars().count())
+        && kind.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && kind.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && !RESERVED_RELATIONS.contains(&kind)
+}
+
+/// Relationships only the app itself makes.
+pub const RESERVED_RELATIONS: &[&str] = &["LINKS_TO", "MENTIONED_IN"];
+
+/// The stored kind for a kind name, and the role it implies. Kinds the app doesn't know are
+/// kept as given, so new kinds of page (a Grant, a Paper) can appear as they're needed.
+pub fn resolve_kind(kind: &str) -> Option<(String, Option<&'static str>)> {
     if let Some(k) = ENTITY_KINDS.iter().copied().find(|k| *k == kind) {
-        return Some((k, None));
+        return Some((k.to_string(), None));
     }
-    KIND_ALIASES.iter().find(|(alias, _, _)| *alias == kind).map(|(_, k, role)| (*k, Some(*role)))
+    if let Some((_, k, role)) = KIND_ALIASES.iter().find(|(alias, _, _)| *alias == kind) {
+        return Some((k.to_string(), Some(*role)));
+    }
+    is_kind_name(kind).then(|| (kind.trim().to_string(), None))
 }
 
 /// A person's first role, e.g. "student".
@@ -495,6 +520,7 @@ impl Graph {
     /// is kept. An alias kind ("Student") adds its role, also to an existing person.
     pub fn upsert_entity(&self, kind: &str, name: &str) -> Result<Entity, GraphError> {
         let (kind, role) = resolve_kind(kind).ok_or_else(|| GraphError::UnknownEntityKind(kind.into()))?;
+        let kind = kind.as_str();
         let name = normalize(name);
         if name.is_empty() {
             return Err(GraphError::EmptyName);
@@ -542,7 +568,7 @@ impl Graph {
 
     /// Links two existing entities. Linking the same pair with the same kind again is a no-op.
     pub fn link(&self, from_id: &str, kind: &str, to_id: &str) -> Result<(), GraphError> {
-        if !RELATION_KINDS.contains(&kind) {
+        if !RELATION_KINDS.contains(&kind) && !is_relation_name(kind) {
             return Err(GraphError::UnknownRelationKind(kind.into()));
         }
 
@@ -571,6 +597,7 @@ impl Graph {
     /// Entities of a kind, by name; an alias kind ("Student") lists entities with its role.
     pub fn entities_of_kind(&self, kind: &str) -> Result<Vec<Entity>, GraphError> {
         let (kind, role) = resolve_kind(kind).ok_or_else(|| GraphError::UnknownEntityKind(kind.into()))?;
+        let kind = kind.as_str();
         if let Some(role) = role {
             return Ok(self
                 .entities_of_kind(kind)?
@@ -1305,6 +1332,7 @@ impl Graph {
     /// Changes an entity's kind, keeping its id, details and relationships.
     pub fn change_kind(&self, id: &str, kind: &str) -> Result<Entity, GraphError> {
         let (kind, role) = resolve_kind(kind).ok_or_else(|| GraphError::UnknownEntityKind(kind.into()))?;
+        let kind = kind.as_str();
         self.set_kind(id, kind)?;
         if let Some(role) = role {
             return self.add_tags(id, &[role.to_string()]);
@@ -1588,12 +1616,35 @@ mod tests {
     }
 
     #[test]
+    fn new_kind_and_relationship_names_are_recognized() {
+        for name in ["Grant", "Paper", "Reading Group", "ResearchArea"] {
+            assert!(is_kind_name(name), "{name}");
+        }
+        for name in ["grant", "G", "Grant!", "WORKS_ON", "Grant 2"] {
+            assert!(!is_kind_name(name), "{name}");
+        }
+        for name in ["REVIEWS", "IS_EXAMINER_FOR", "FUNDS"] {
+            assert!(is_relation_name(name), "{name}");
+        }
+        for name in ["reviews", "Reviews", "LINKS_TO", "MENTIONED_IN", "IS-FOR", "AB"] {
+            assert!(!is_relation_name(name), "{name}");
+        }
+    }
+
+    #[test]
     fn rejects_invalid_input() {
         let g = Graph::in_memory().unwrap();
-        assert!(matches!(g.upsert_entity("Robot", "R2"), Err(GraphError::UnknownEntityKind(_))));
+        // A new kind of page is allowed; something that isn't a kind name isn't.
+        assert_eq!(g.upsert_entity("Grant", "SERB CRG").unwrap().kind, "Grant");
+        assert!(matches!(g.upsert_entity("robot!", "R2"), Err(GraphError::UnknownEntityKind(_))));
+        assert!(matches!(g.upsert_entity("a", "R2"), Err(GraphError::UnknownEntityKind(_))));
         assert!(matches!(g.upsert_entity("Idea", "   "), Err(GraphError::EmptyName)));
         let a = g.upsert_entity("Student", "Rahul").unwrap();
-        assert!(matches!(g.link(&a.id, "LIKES", &a.id), Err(GraphError::UnknownRelationKind(_))));
+        // A new relationship is allowed; a name that isn't one isn't.
+        let b = g.upsert_entity("Note", "Other").unwrap();
+        assert!(g.link(&a.id, "REVIEWS", &b.id).is_ok());
+        assert!(matches!(g.link(&a.id, "likes", &b.id), Err(GraphError::UnknownRelationKind(_))));
+        assert!(matches!(g.link(&a.id, "LINKS_TO ", &b.id), Err(GraphError::UnknownRelationKind(_))));
         assert!(matches!(g.link(&a.id, "WORKS_ON", "project:missing"), Err(GraphError::NotFound(_))));
     }
 
@@ -2100,7 +2151,8 @@ mod tests {
         assert!(matches!(g.rename(&satya.id, "fuzzing"), Err(GraphError::InvalidName(_))));
         let student = g.change_kind(&satya.id, "Student").unwrap();
         assert_eq!((student.kind.as_str(), student.tags.clone()), ("Person", vec!["student".to_string()]));
-        assert!(g.change_kind(&satya.id, "Robot").is_err());
+        assert!(g.change_kind(&satya.id, "robot").is_err());
+        assert_eq!(g.change_kind(&satya.id, "Grant Application").unwrap().kind, "Grant Application");
 
         g.delete(&satya.id).unwrap();
         assert!(g.get(&satya.id).unwrap().is_none());

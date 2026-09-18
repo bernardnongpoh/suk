@@ -405,7 +405,7 @@ impl Vault {
                 Err(e) => eprintln!("vault: not renaming {} to {stem}: {e}", entity.name),
             }
         }
-        if let Some(kind) = valid_kind.filter(|k| resolve_kind(k).map(|(k, _)| k) != Some(entity.kind.as_str())) {
+        if let Some(kind) = valid_kind.filter(|k| resolve_kind(k).map(|(k, _)| k) != Some(entity.kind.clone())) {
             entity = graph.change_kind(&entity.id, kind).map_err(err)?;
             changed = true;
         }
