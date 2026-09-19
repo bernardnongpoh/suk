@@ -181,7 +181,7 @@ export interface ChatStatus {
   status: string;
 }
 
-export type AssistantKind = "claude" | "codex";
+export type AssistantKind = "claude" | "codex" | "gemini";
 
 /** Where an assistant stands on this computer. */
 export interface AssistantInfo {
@@ -215,6 +215,8 @@ export interface SignInPrompt {
   code: string | null;
   /** Claude Code: the page shows a code to paste back. */
   needs_code: boolean;
+  /** Gemini CLI: finish signing in in the terminal window that opened. */
+  in_terminal: boolean;
 }
 
 function statusChannel(onStatus: (status: string) => void) {
@@ -247,6 +249,9 @@ export const confirmProposal = (
   invoke<ChatReply>("confirm_proposal", { id, items, onStatus: statusChannel(onStatus) });
 
 export const dismissProposal = (id: string) => invoke<Proposal>("dismiss_proposal", { id });
+
+/** Starts a new conversation: the assistant begins fresh, with a short summary of what's recent. */
+export const newConversation = () => invoke<void>("new_conversation");
 
 export const chatHistory = (focus: string | null) =>
   invoke<ChatRecord[]>("chat_history", { focus });
@@ -318,6 +323,20 @@ export const listEntities = (kind: EntityKind) =>
   invoke<Entity[]>("list_entities", { kind });
 
 export const getEntity = (id: string) => invoke<EntityDetail>("get_entity", { id });
+
+/** A starter setup: the sections it adds and what the assistant is told about your work. */
+export interface Template {
+  id: string;
+  name: string;
+  about: string;
+  adds: string[];
+}
+
+/** The templates on offer, and the one in use. */
+export const templates = () => invoke<[Template[], string | null]>("templates");
+
+/** Adds a template's sections and remembers the choice; returns the sections added. */
+export const applyTemplate = (id: string) => invoke<string[]>("apply_template", { id });
 
 export const assistantStatus = () => invoke<AssistantStatus>("assistant_status");
 

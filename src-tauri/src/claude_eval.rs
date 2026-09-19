@@ -60,7 +60,7 @@ fn claude_conversation() {
     let setup = Setup {
         binary: claude::find_binary().expect("claude not installed"),
         workdir: workdir.clone(),
-        mcp: endpoint,
+        mcp: endpoint, about_user: String::new()
     };
     let claude = Claude::default();
     let failures = std::cell::RefCell::new(Vec::new());
@@ -189,7 +189,7 @@ fn claude_pages_and_focus() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-pages-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     // [App] notes the app sends before the next message.
     let notes = crate::assistant::Notes::default();
@@ -362,7 +362,7 @@ fn claude_people() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-people-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let failures = std::cell::RefCell::new(Vec::new());
     let fail = |step: &str, e: String| {
@@ -466,7 +466,7 @@ fn claude_tasks() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-tasks-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     // [App] notes the app sends before the next message.
     let notes = crate::assistant::Notes::default();
@@ -567,7 +567,7 @@ fn claude_rename() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-rename-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let say = |message: &str| {
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -609,7 +609,7 @@ fn claude_organizations() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-orgs-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let failures = std::cell::RefCell::new(Vec::new());
     let fail = |step: &str, e: String| {
@@ -706,7 +706,7 @@ fn claude_assigned_tasks() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-assign-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let say = |message: &str| {
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -765,7 +765,7 @@ fn claude_following() {
     let workdir = std::env::temp_dir().join(format!("suk-claude-follow-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
     let binary = claude::find_binary().expect("claude not installed");
-    let setup = Setup { binary: binary.clone(), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: binary.clone(), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let say = |message: &str| {
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -863,7 +863,7 @@ fn claude_project_status() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-status-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let say = |message: &str| {
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -935,7 +935,7 @@ fn claude_corrections() {
         let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: Default::default(), activity: activity.clone() }).unwrap();
         let workdir = std::env::temp_dir().join(format!("suk-claude-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&workdir);
-        let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+        let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
         (graph, activity, setup, Claude::default(), workdir)
     }
     fn say(graph: &Graph, activity: &tools::Activity, setup: &Setup, claude: &Claude, message: &str) -> String {
@@ -1021,7 +1021,7 @@ fn claude_token_budget() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-budget-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let script = [
         "Satya Das joined as my PhD student this semester, email satya@example.edu. He'll work on compiler fuzzing with Kavya Rao from IISc.",

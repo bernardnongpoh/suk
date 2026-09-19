@@ -4,12 +4,14 @@ mod claude;
 mod claude_eval;
 mod codex;
 mod commands;
+mod gemini;
 mod graph;
 mod links;
 mod mcp;
 mod migrate;
 mod pages;
 mod relations;
+mod templates;
 mod tools;
 mod vault;
 mod watch;
@@ -74,6 +76,60 @@ const DATABASE: &str = "suk.lbdb";
 /// The folder in Documents that holds every page as a Markdown file.
 const FOLDER: &str = "Suk";
 
+/// macOS only draws the app menu the system needs for Cmd-C, Cmd-V and friends if the app sets
+/// one. On Linux the WebView handles those keys itself.
+#[cfg(target_os = "macos")]
+fn app_menu(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+    let about = Submenu::with_items(
+        app,
+        "Suk",
+        true,
+        &[
+            &PredefinedMenuItem::about(app, None, Some(AboutMetadata::default()))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::show_all(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, None)?,
+        ],
+    )?;
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+    let view = Submenu::with_items(
+        app,
+        "View",
+        true,
+        &[&MenuItem::with_id(app, "search", "Search…", true, Some("CmdOrCtrl+K"))?, &PredefinedMenuItem::fullscreen(app, None)?],
+    )?;
+    let window = Submenu::with_items(
+        app,
+        "Window",
+        true,
+        &[&PredefinedMenuItem::minimize(app, None)?, &PredefinedMenuItem::close_window(app, None)?],
+    )?;
+    app.set_menu(Menu::with_items(app, &[&about, &edit, &view, &window])?)?;
+    app.on_menu_event(|app, event| {
+        if event.id() == "search" {
+            let _ = app.emit("open-search", ());
+        }
+    });
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -94,11 +150,14 @@ pub fn run() {
             start_vault_sync(app.handle().clone());
             app.manage(claude::Claude::default());
             app.manage(codex::Codex::default());
+            app.manage(gemini::Gemini::default());
             app.manage(assistant::Notes::default());
             app.manage(assistant::SignIn::default());
             let endpoint = mcp::start(app.handle().clone())?;
             eprintln!("mcp: tools for Claude at {}", endpoint.url);
             app.manage(endpoint);
+            #[cfg(target_os = "macos")]
+            app_menu(app.handle())?;
             app.manage(watch::Watcher::default());
             start_watching(app.handle().clone());
             Ok(())
@@ -108,6 +167,7 @@ pub fn run() {
             commands::confirm_proposal,
             commands::dismiss_proposal,
             commands::chat_history,
+            commands::new_conversation,
             commands::list_tasks,
             commands::set_task_done,
             commands::assign_task,
@@ -133,6 +193,8 @@ pub fn run() {
             commands::open_url,
             commands::assistant_status,
             commands::choose_assistant,
+            commands::templates,
+            commands::apply_template,
             commands::install_assistant,
             commands::sign_in_assistant,
             commands::submit_sign_in_code,

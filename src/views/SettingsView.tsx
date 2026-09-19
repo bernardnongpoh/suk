@@ -1,17 +1,22 @@
 import { useEffect, useState } from "react";
-import { assistantStatus, getVault, openPageFile, type AssistantStatus, type VaultInfo } from "../api";
+import { applyTemplate, assistantStatus, getVault, openPageFile, templates, type AssistantStatus, type Template, type VaultInfo } from "../api";
 import Icon from "../ui/Icon";
 import { ACCENTS, applyAppearance, loadAppearance, type Appearance, type Theme } from "../ui/appearance";
 
 interface Props {
   /** Opens setup to switch between Claude Code and Codex. */
   onChangeAssistant: () => void;
+  /** Sections may have changed. */
+  onChanged: () => void;
 }
 
-function SettingsView({ onChangeAssistant }: Props) {
+function SettingsView({ onChangeAssistant, onChanged }: Props) {
   const [assistant, setAssistant] = useState<AssistantStatus | null>(null);
   const [vault, setVault] = useState<VaultInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [starters, setStarters] = useState<Template[]>([]);
+  const [starter, setStarter] = useState<string | null>(null);
+  const [added, setAdded] = useState<string | null>(null);
   const [appearance, setAppearance] = useState<Appearance>(loadAppearance);
   const change = (next: Partial<Appearance>) => {
     const value = { ...appearance, ...next };
@@ -21,6 +26,10 @@ function SettingsView({ onChangeAssistant }: Props) {
 
   useEffect(() => {
     assistantStatus().then(setAssistant, (err) => setError(String(err)));
+    templates().then(([all, chosen]) => {
+      setStarters(all);
+      setStarter(chosen);
+    }, () => {});
     getVault().then(setVault, (err) => setError(String(err)));
   }, []);
 
@@ -129,6 +138,38 @@ function SettingsView({ onChangeAssistant }: Props) {
           </div>
         </div>
       )}
+
+      <h2 className="section-title">What you do</h2>
+      <div className="settings-card">
+        {starters.map((t) => (
+          <div key={t.id} className="settings-row">
+            <span className="section-icon">
+              <Icon name={t.id === "academic" ? "student" : "briefcase"} size={15} />
+            </span>
+            <div className="settings-text">
+              <div className="model-name">{t.name}</div>
+              <div className="muted">{t.adds.join(". ")}.</div>
+            </div>
+            {starter === t.id ? (
+              <span className="setup-badge ready">In use</span>
+            ) : (
+              <button
+                className="button small"
+                onClick={() =>
+                  applyTemplate(t.id).then((sections) => {
+                    setStarter(t.id);
+                    setAdded(sections.length ? `Added ${sections.join(", ")} to the sidebar.` : "Nothing new to add; the assistant now knows what you do.");
+                    onChanged();
+                  }, (err) => setError(String(err)))
+                }
+              >
+                Use this
+              </button>
+            )}
+          </div>
+        ))}
+        {added && <p className="form-note">{added}</p>}
+      </div>
 
       <h2 className="section-title">Your files</h2>
       {vault && (

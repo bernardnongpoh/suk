@@ -49,6 +49,9 @@ interface Props {
   id: string;
   /** Bumped when pages may have changed elsewhere (chat, edits to the Markdown files). */
   version: number;
+  /** The page's chat, kept by the app so a form or schedule isn't lost when you navigate. */
+  messages: ChatMessage[];
+  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   onOpen: (id: string) => void;
   onBack: (() => void) | null;
   onChanged: () => void;
@@ -77,7 +80,7 @@ function section(link: Link): string {
   return plural[link.other.kind] ?? "Related";
 }
 
-function PageView({ id, version, onOpen, onBack, onChanged }: Props) {
+function PageView({ id, version, messages, setMessages, onOpen, onBack, onChanged }: Props) {
   const [detail, setDetail] = useState<EntityDetail | null>(null);
   // Pages open in Obsidian when their folder is a vault there; otherwise the file is shown.
   const [inObsidian, setInObsidian] = useState(false);
@@ -85,7 +88,6 @@ function PageView({ id, version, onOpen, onBack, onChanged }: Props) {
     getVault().then((v) => setInObsidian(v.registered), () => {});
   }, []);
   const [error, setError] = useState<string | null>(null);
-  const [chat, setChat] = useState<ChatMessage[]>([]);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [tagDraft, setTagDraft] = useState<string | null>(null);
   const [menu, setMenu] = useState<"page" | "role" | "assign" | "status" | "icon" | null>(null);
@@ -600,7 +602,7 @@ function PageView({ id, version, onOpen, onBack, onChanged }: Props) {
       </div>
 
       <aside className="page-chat">
-        <ChatView key={entity.id} messages={chat} setMessages={setChat} focus={entity} onChanged={changed} onOpen={onOpen} />
+        <ChatView key={entity.id} messages={messages} setMessages={setMessages} focus={entity} onChanged={changed} onOpen={onOpen} />
       </aside>
     </div>
   );

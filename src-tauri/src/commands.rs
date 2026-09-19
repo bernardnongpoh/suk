@@ -12,10 +12,12 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::assistant::{self, Kind, Notes, Settings, SignIn, SignInPrompt};
 use crate::claude::{self, Claude, Turn};
 use crate::codex::{self, Codex};
+use crate::gemini::{self, Gemini};
 use crate::graph::{Affiliation, ChatRecord, Entity, Graph, GraphError, Link, LinkDetails, TaskQuery, ROLES};
 use crate::links;
 use crate::mcp::Endpoint;
 use crate::pages::{self, DetailsRequest, Hit, SectionIdea, TaskItem, DETAILS_SKIPPED};
+use crate::templates::{self, Template};
 use crate::tools::{self, Activity, Proposal, Proposals};
 use crate::vault::{self, Vault};
 use crate::watch::{self, AuthorCandidate, WatchInfo, Watcher};
@@ -68,9 +70,10 @@ fn assistant_turn(app: &AppHandle, message: &str, on_status: &mut dyn FnMut(&str
     // A new session (each day, or when the conversation grows long) starts with a short summary of
     // the last messages instead of re-reading the whole history.
     let brief = || pages::recent_brief(&app.state::<Graph>()).unwrap_or_default();
+    let about_user = templates::instructions(Settings::load(&dir).template.as_deref());
     match kind {
         Kind::Claude => {
-            let setup = claude::Setup { binary, workdir: dir.join("claude"), mcp };
+            let setup = claude::Setup { binary, workdir: dir.join("claude"), mcp, about_user };
             let claude = app.state::<Claude>();
             if claude.begins_fresh(&setup) {
                 content = format!("{}{content}", brief());
@@ -78,14 +81,45 @@ fn assistant_turn(app: &AppHandle, message: &str, on_status: &mut dyn FnMut(&str
             claude.send(&setup, &content, on_status)
         }
         Kind::Codex => {
-            let setup = codex::Setup { binary, workdir: dir.join("codex"), mcp };
+            let setup = codex::Setup { binary, workdir: dir.join("codex"), mcp, about_user };
             let codex = app.state::<Codex>();
             if codex.begins_fresh(&setup) {
                 content = format!("{}{content}", brief());
             }
             codex.send(&setup, &content, on_status)
         }
+        Kind::Gemini => {
+            let setup = gemini::Setup { binary, workdir: dir.join("gemini"), mcp, about_user };
+            let gemini = app.state::<Gemini>();
+            if gemini.begins_fresh(&setup) {
+                content = format!("{}{content}", brief());
+            }
+            gemini.send(&setup, &content, on_status)
+        }
     }
+}
+
+/// Starts a new conversation: the assistant forgets the exchange so far and begins the next
+/// message fresh, with a short summary. Everything said stays in the app.
+#[tauri::command]
+pub async fn new_conversation(app: AppHandle) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    let mcp = app.state::<Endpoint>().inner().clone();
+    match chosen(&app) {
+        Some(Kind::Gemini) => {
+            let binary = assistant::find(Kind::Gemini).unwrap_or_default();
+            app.state::<Gemini>().start_over(&gemini::Setup { binary, workdir: dir.join("gemini"), mcp, about_user: String::new() });
+        }
+        Some(Kind::Codex) => {
+            let binary = assistant::find(Kind::Codex).unwrap_or_default();
+            app.state::<Codex>().start_over(&codex::Setup { binary, workdir: dir.join("codex"), mcp, about_user: String::new() });
+        }
+        _ => {
+            let binary = claude::find_binary().unwrap_or_default();
+            app.state::<Claude>().start_over(&claude::Setup { binary, workdir: dir.join("claude"), mcp, about_user: String::new() });
+        }
+    }
+    Ok(())
 }
 
 /// Handles a message with Claude. `focus` is the id of the page the message was sent from, and
@@ -728,7 +762,7 @@ pub struct AssistantStatus {
     chosen: Option<Kind>,
     /// Whether the chosen assistant is installed and signed in, so the app can run.
     ready: bool,
-    /// Claude Code, then Codex.
+    /// Claude Code, Codex, then Gemini CLI.
     assistants: Vec<assistant::Status>,
     /// Google Calendar connector status, known once Claude Code has answered a message.
     calendar_status: Option<String>,
@@ -738,10 +772,11 @@ pub struct AssistantStatus {
 /// Whether Claude Code and Codex are installed and signed in, and which one the app uses.
 #[tauri::command]
 pub async fn assistant_status(app: AppHandle) -> Result<AssistantStatus, String> {
-    let (claude, codex) = tauri::async_runtime::spawn_blocking(|| {
+    let (claude, codex, gemini) = tauri::async_runtime::spawn_blocking(|| {
         let codex = std::thread::spawn(|| assistant::status(Kind::Codex));
+        let gemini = std::thread::spawn(|| assistant::status(Kind::Gemini));
         let claude = assistant::status(Kind::Claude);
-        (claude, codex.join().expect("status check"))
+        (claude, codex.join().expect("status check"), gemini.join().expect("status check"))
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -749,15 +784,36 @@ pub async fn assistant_status(app: AppHandle) -> Result<AssistantStatus, String>
     let ready = match chosen {
         Some(Kind::Claude) => claude.ready(),
         Some(Kind::Codex) => codex.ready(),
+        Some(Kind::Gemini) => gemini.ready(),
         None => false,
     };
     Ok(AssistantStatus {
         chosen,
         ready,
-        assistants: vec![claude, codex],
+        assistants: vec![claude, codex, gemini],
         calendar_status: app.state::<Claude>().calendar_status(),
         calendar_help: CALENDAR_HELP,
     })
+}
+
+/// The starter templates, and the one in use.
+#[tauri::command]
+pub async fn templates(app: AppHandle) -> Result<(Vec<Template>, Option<String>), String> {
+    let chosen = Settings::load(&data_dir(&app)?).template;
+    Ok((templates::TEMPLATES.to_vec(), chosen))
+}
+
+/// Applies a starter template: adds its sidebar sections and tells the assistant what kind of
+/// work the user does. Sections already there are left alone.
+#[tauri::command]
+pub async fn apply_template(app: AppHandle, id: String) -> Result<Vec<String>, String> {
+    templates::find(&id).ok_or_else(|| format!("no template called {id}"))?;
+    let added = templates::apply(&app.state::<Graph>(), &id).map_err(text)?;
+    let dir = data_dir(&app)?;
+    let mut settings = Settings::load(&dir);
+    settings.template = Some(id);
+    settings.save(&dir)?;
+    Ok(added)
 }
 
 /// Chooses the assistant the app uses.
@@ -833,6 +889,7 @@ pub fn watch_round(app: &AppHandle, only: Option<&str>) -> Result<watch::Round, 
     let ask = |prompt: &str, schema: &serde_json::Value| match (kind, &binary) {
         (Some(Kind::Claude), Some(binary)) => claude::ask_json(binary, &workdir, watch::JUDGE_SYSTEM, prompt, schema),
         (Some(Kind::Codex), Some(binary)) => codex::ask_json(binary, &workdir, watch::JUDGE_SYSTEM, prompt, schema),
+        (Some(Kind::Gemini), Some(binary)) => gemini::ask_json(binary, &workdir, watch::JUDGE_SYSTEM, prompt, schema),
         _ => Err("No assistant is set up".to_string()),
     };
     let ask: Option<&dyn Fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>> = binary.as_ref().map(|_| &ask as _);

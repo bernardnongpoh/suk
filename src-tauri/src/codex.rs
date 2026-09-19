@@ -56,6 +56,8 @@ pub struct Setup {
     /// An empty directory to run in, so no project files or instructions are picked up.
     pub workdir: PathBuf,
     pub mcp: Endpoint,
+    /// Added to the instructions: what kind of work the user does.
+    pub about_user: String,
 }
 
 #[derive(Default)]
@@ -65,6 +67,12 @@ pub struct Codex {
 }
 
 impl Codex {
+    /// Forgets the current thread, so the next message starts a new conversation.
+    pub fn start_over(&self, setup: &Setup) {
+        *self.thread.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        let _ = std::fs::remove_file(setup.workdir.join(THREAD_FILE));
+    }
+
     /// Starts a new thread on a new day. Returns whether the next message begins a new thread.
     pub fn begins_fresh(&self, setup: &Setup) -> bool {
         let mut thread = self.thread.lock().unwrap_or_else(|e| e.into_inner());
@@ -239,7 +247,7 @@ fn arguments(setup: &Setup, thread: Option<&str>) -> Vec<String> {
     let server = format!("mcp_servers.{SERVER_NAME}");
     args.extend([
         "-c".into(),
-        format!("developer_instructions={}", toml_string(&format!("{SYSTEM_PROMPT}{CODEX_NOTE}"))),
+        format!("developer_instructions={}", toml_string(&format!("{SYSTEM_PROMPT}{CODEX_NOTE}{}", setup.about_user))),
         "-c".into(),
         format!("{server}.url={}", toml_string(&setup.mcp.url)),
         "-c".into(),
@@ -313,6 +321,7 @@ mod tests {
             binary: "codex".into(),
             workdir: "/tmp/suk-codex".into(),
             mcp: Endpoint { url: "http://127.0.0.1:4000/mcp".into(), token: "secret".into() },
+            about_user: String::new(),
         }
     }
 
@@ -363,7 +372,7 @@ mod tests {
                 let _ = stream.write_all(b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\n\r\n");
             }
         });
-        let setup = Setup { binary: binary.into(), workdir: workdir.clone(), mcp: Endpoint { url: format!("http://127.0.0.1:{port}/mcp"), token: "t".into() } };
+        let setup = Setup { binary: binary.into(), workdir: workdir.clone(), mcp: Endpoint { url: format!("http://127.0.0.1:{port}/mcp"), token: "t".into() }, about_user: String::new() };
         let mut args = arguments(&setup, None);
         args.insert(1, "--strict-config".into());
         let out = Command::new(&setup.binary)

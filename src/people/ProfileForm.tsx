@@ -11,13 +11,15 @@ interface Props {
   onChange: () => void;
   onOpen?: (id: string) => void;
   onClose?: () => void;
+  /** The form has been filled in or skipped, so nothing is waiting on it. */
+  onDone?: () => void;
 }
 
 /**
  * Asks who a person is: how they're connected to the user, and whatever details are still
  * missing. A profile link fills them in. Everything is optional.
  */
-function ProfileForm({ request, place, onChange, onOpen, onClose }: Props) {
+function ProfileForm({ request, place, onChange, onOpen, onClose, onDone }: Props) {
   const [entity, setEntity] = useState<Entity>(request.entity);
   // Existing organizations, by every name, offered for Affiliation.
   const [organizations, setOrganizations] = useState<string[]>([]);
@@ -73,6 +75,7 @@ function ProfileForm({ request, place, onChange, onOpen, onClose }: Props) {
       await submitDetails(entity.id, given, roles);
       setDone("saved");
       onChange();
+      onDone?.();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -89,6 +92,7 @@ function ProfileForm({ request, place, onChange, onOpen, onClose }: Props) {
       await skipDetails(entity.id);
       setDone("skipped");
       onChange();
+      onDone?.();
     } catch (err) {
       setError(String(err));
     }

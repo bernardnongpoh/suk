@@ -81,6 +81,8 @@ pub struct Setup {
     /// An empty directory to run in, so no project files or instructions are picked up.
     pub workdir: PathBuf,
     pub mcp: Endpoint,
+    /// Added to the instructions: what kind of work the user does.
+    pub about_user: String,
 }
 
 /// What a finished turn produced besides its text.
@@ -185,6 +187,14 @@ impl Claude {
             return true;
         }
         saved.is_none()
+    }
+
+    /// Forgets the current session, so the next message starts a new conversation.
+    pub fn start_over(&self, setup: &Setup) {
+        *lock(&self.process) = None;
+        *lock(&self.session_id) = None;
+        *lock(&self.last_context) = 0;
+        let _ = std::fs::remove_file(setup.workdir.join(SESSION_FILE));
     }
 
     /// None until Claude has answered once.
@@ -386,7 +396,7 @@ fn arguments(setup: &Setup, session: Option<&str>) -> Vec<String> {
     .collect();
     args.extend([
         "--system-prompt".into(),
-        SYSTEM_PROMPT.into(),
+        format!("{SYSTEM_PROMPT}{}", setup.about_user),
         "--mcp-config".into(),
         setup.mcp.claude_config(SERVER_NAME),
         "--allowedTools".into(),
@@ -537,6 +547,7 @@ mod tests {
             binary: "claude".into(),
             workdir: "/tmp".into(),
             mcp: Endpoint { url: "http://127.0.0.1:1/mcp".into(), token: "t".into() },
+            about_user: "\n\nThe user is an academic.".into(),
         };
         let args = arguments(&setup, Some("abc"));
         let value = |flag: &str| {
@@ -546,6 +557,7 @@ mod tests {
         assert_eq!(value("--tools"), "");
         assert_eq!(value("--setting-sources"), "");
         assert_eq!(value("--resume"), "abc");
+        assert!(value("--system-prompt").ends_with("The user is an academic."), "the template's line is added");
         assert_eq!(value("--permission-prompt-tool"), "mcp__suk__approve");
         let allowed = value("--allowedTools");
         assert!(allowed.contains("mcp__suk__propose_schedule"));

@@ -11,17 +11,23 @@ import SettingsView from "./views/SettingsView";
 import UpdatesView from "./views/UpdatesView";
 import Icon from "./ui/Icon";
 import Setup from "./onboarding/Setup";
-import { assistantStatus, getSidebar, listUpdates, type Sidebar as SidebarData } from "./api";
+import { assistantStatus, getSidebar, listUpdates, newConversation, type Sidebar as SidebarData } from "./api";
 import type { ChatMessage, Route } from "./types";
 import "./App.css";
 
 const PLAN_PROMPT = "What should I focus on today? Plan my day.";
+
+/** Whether a chat is waiting on something: a reply, a schedule to confirm, or a form to fill in. */
+const waiting = (messages: ChatMessage[]) =>
+  messages.some((m) => m.proposals?.some((p) => p.status === "pending") || (m.details?.length ?? 0) > 0);
 
 function App() {
   // Opening pages pushes onto the stack, so Back returns to where you were.
   const [stack, setStack] = useState<Route[]>([{ view: "chat" }]);
   // Lives here so the conversation survives switching views.
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  // A page's chat, kept only while it's waiting on something; otherwise the page opens clean.
+  const [pageChats, setPageChats] = useState<Record<string, ChatMessage[]>>({});
   const [chatPrompt, setChatPrompt] = useState<string | null>(null);
   const [sidebar, setSidebar] = useState<SidebarData | null>(null);
   const [searching, setSearching] = useState(false);
@@ -39,12 +45,21 @@ function App() {
   }, []);
 
   const route = stack[stack.length - 1];
-  const select = (r: Route) => setStack([r]);
-  const open = (id: string) =>
+  const select = (r: Route) => {
+    // Clicking Chat again starts a new conversation; what was said stays saved.
+    if (r.view === "chat" && route.view === "chat" && chatMessages.length > 0) {
+      setChatMessages([]);
+      newConversation().catch(() => {});
+    }
+    setStack([r]);
+  };
+  const open = (id: string) => {
+    setPageChats((chats) => (waiting(chats[id] ?? []) ? chats : { ...chats, [id]: [] }));
     setStack((s) => {
       const top = s[s.length - 1];
       return top.view === "page" && top.id === id ? s : [...s, { view: "page", id }];
     });
+  };
   const back = stack.length > 1 ? () => setStack((s) => s.slice(0, -1)) : null;
 
   const changed = useCallback(() => {
@@ -81,6 +96,8 @@ function App() {
     getSidebar().then(setSidebar, () => {});
     // Edits made to the Markdown files, in Obsidian or any editor.
     const unlisten = listen("pages-changed", changed).catch(() => () => {});
+    // The macOS menu owns ⌘K, so search opens from there too.
+    const stopSearch = listen("open-search", () => setSearching(true)).catch(() => () => {});
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -91,6 +108,7 @@ function App() {
     return () => {
       window.removeEventListener("keydown", onKey);
       unlisten.then((stop) => stop());
+      stopSearch.then((stop) => stop());
     };
   }, [changed]);
 
@@ -138,6 +156,7 @@ function App() {
           <ChatView
             messages={chatMessages}
             setMessages={setChatMessages}
+            loadHistory
             prompt={chatPrompt}
             onPromptSent={() => setChatPrompt(null)}
             onChanged={changed}
@@ -158,9 +177,23 @@ function App() {
           />
         )}
         {route.view === "page" && (
-          <PageView key={route.id} id={route.id} version={version} onOpen={open} onBack={back} onChanged={changed} />
+          <PageView
+            key={route.id}
+            id={route.id}
+            version={version}
+            messages={pageChats[route.id] ?? []}
+            setMessages={(update) =>
+              setPageChats((chats) => ({
+                ...chats,
+                [route.id]: typeof update === "function" ? update(chats[route.id] ?? []) : update,
+              }))
+            }
+            onOpen={open}
+            onBack={back}
+            onChanged={changed}
+          />
         )}
-        {route.view === "settings" && <SettingsView onChangeAssistant={() => setChangingAssistant(true)} />}
+        {route.view === "settings" && <SettingsView onChangeAssistant={() => setChangingAssistant(true)} onChanged={changed} />}
       </main>
       {toast && (
         <div className="toast" role="status">

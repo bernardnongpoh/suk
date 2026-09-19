@@ -14,6 +14,7 @@ use serde_json::Value;
 pub enum Kind {
     Claude,
     Codex,
+    Gemini,
 }
 
 impl Kind {
@@ -21,6 +22,7 @@ impl Kind {
         match self {
             Kind::Claude => "Claude Code",
             Kind::Codex => "Codex",
+            Kind::Gemini => "Gemini CLI",
         }
     }
 
@@ -28,6 +30,7 @@ impl Kind {
         match self {
             Kind::Claude => "claude",
             Kind::Codex => "codex",
+            Kind::Gemini => "gemini",
         }
     }
 
@@ -36,6 +39,8 @@ impl Kind {
         match self {
             Kind::Claude => "curl -fsSL https://claude.ai/install.sh | bash",
             Kind::Codex => "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+            // Gemini CLI has no installer script; npm puts it under ~/.local without sudo.
+            Kind::Gemini => "npm install -g --prefix ~/.local @google/gemini-cli",
         }
     }
 
@@ -44,6 +49,7 @@ impl Kind {
         match self {
             Kind::Claude => "a Claude Pro or Max plan, or an Anthropic Console account",
             Kind::Codex => "a ChatGPT Plus, Pro, Business or Enterprise plan",
+            Kind::Gemini => "a Google account (free tier included), a Gemini Code Assist licence, or an API key",
         }
     }
 }
@@ -53,6 +59,9 @@ impl Kind {
 pub struct Settings {
     #[serde(default)]
     pub assistant: Option<Kind>,
+    /// The starter template chosen when setting up ("academic"), if any.
+    #[serde(default)]
+    pub template: Option<String>,
 }
 
 const SETTINGS_FILE: &str = "settings.json";
@@ -123,6 +132,7 @@ pub fn status(kind: Kind) -> Status {
         (Some(binary), Kind::Codex) => output(binary, &["login", "status"])
             .map(|(ok, out)| codex_auth(ok, &out))
             .unwrap_or((false, None)),
+        (Some(_), Kind::Gemini) => gemini_auth(),
         (None, _) => (false, None),
     };
     Status {
@@ -167,6 +177,39 @@ fn codex_auth(ok: bool, output: &str) -> (bool, Option<String>) {
     (signed_in, if signed_in { how } else { None })
 }
 
+/// Gemini CLI signs in through its own screens, which leave credentials in ~/.gemini; an API key
+/// in the environment counts too.
+fn gemini_auth() -> (bool, Option<String>) {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if home.map(|h| h.join(".gemini/oauth_creds.json")).is_some_and(|p| p.is_file()) {
+        return (true, Some("Signed in with a Google account".into()));
+    }
+    for key in ["GEMINI_API_KEY", "GOOGLE_API_KEY"] {
+        if std::env::var(key).is_ok_and(|v| !v.trim().is_empty()) {
+            return (true, Some(format!("Using {key}")));
+        }
+    }
+    (false, None)
+}
+
+/// Opens a terminal window running a command, for a sign-in that needs one.
+fn open_terminal(command: &str) -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        let script = format!("tell application \"Terminal\" to do script \"{command}\"");
+        return Command::new("osascript")
+            .args(["-e", &script, "-e", "tell application \"Terminal\" to activate"])
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string());
+    }
+    for terminal in ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"] {
+        if let Some(path) = find_program(terminal) {
+            return Command::new(path).args(["-e", command]).spawn().map(|_| ()).map_err(|e| e.to_string());
+        }
+    }
+    Err(format!("No terminal window could be opened. Run this yourself: {command}"))
+}
+
 /// Runs an assistant's official installer, passing each line of output to `on_line`.
 pub fn install(kind: Kind, on_line: &mut dyn FnMut(&str)) -> Result<(), String> {
     let mut child = Command::new("sh")
@@ -200,6 +243,8 @@ pub struct SignInPrompt {
     pub code: Option<String>,
     /// Claude: the page shows a code to paste back into the app.
     pub needs_code: bool,
+    /// Gemini: signing in happens in a terminal window the app opened.
+    pub in_terminal: bool,
 }
 
 /// Reads sign-in instructions from a login command's output so far.
@@ -214,14 +259,15 @@ pub fn sign_in_prompt(kind: Kind, output: &str) -> SignInPrompt {
         .map(|url| url.trim_end_matches(['.', ',', ')', ']']).to_string())
         .next();
     match kind {
-        Kind::Claude => SignInPrompt { needs_code: url.is_some(), url, code: None },
+        Kind::Claude => SignInPrompt { needs_code: url.is_some(), url, code: None, in_terminal: false },
+        Kind::Gemini => SignInPrompt::default(),
         Kind::Codex => {
             // "Enter this one-time code … \n   IB3U-Y26HE"
             let code = text
                 .split_whitespace()
                 .find(|w| w.len() >= 7 && w.contains('-') && w.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-'))
                 .map(String::from);
-            SignInPrompt { url, code, needs_code: false }
+            SignInPrompt { url, code, needs_code: false, in_terminal: false }
         }
     }
 }
@@ -268,6 +314,8 @@ pub fn strip_ansi(text: &str) -> String {
 #[derive(Default)]
 pub struct SignIn {
     running: Mutex<Option<(Kind, Child, Option<ChildStdin>)>>,
+    /// Set by `cancel`, so a sign-in with no process of its own stops too.
+    stopped: std::sync::atomic::AtomicBool,
 }
 
 impl SignIn {
@@ -275,9 +323,25 @@ impl SignIn {
     /// as the login command prints them.
     pub fn run(&self, kind: Kind, on_prompt: &mut dyn FnMut(&SignInPrompt)) -> Result<(), String> {
         let binary = find(kind).ok_or_else(|| format!("{} isn't installed", kind.label()))?;
+        self.stopped.store(false, std::sync::atomic::Ordering::Relaxed);
+        // Gemini CLI signs in from its own screens, so the app opens a terminal for it and waits.
+        if kind == Kind::Gemini {
+            open_terminal(&binary.display().to_string())?;
+            on_prompt(&SignInPrompt { in_terminal: true, ..Default::default() });
+            for _ in 0..600 {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                if status(kind).signed_in {
+                    return Ok(());
+                }
+                if self.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Err("Sign-in was cancelled.".into());
+                }
+            }
+            return Err("Signing in to Gemini CLI didn't finish.".into());
+        }
         let args: &[&str] = match kind {
             Kind::Claude => &["auth", "login"],
-            Kind::Codex => &["login", "--device-auth"],
+            Kind::Codex | Kind::Gemini => &["login", "--device-auth"],
         };
         let mut child = Command::new(binary)
             .args(args)
@@ -344,6 +408,7 @@ impl SignIn {
     }
 
     pub fn cancel(&self) {
+        self.stopped.store(true, std::sync::atomic::Ordering::Relaxed);
         if let Some((_, mut child, _)) = lock(&self.running).take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -396,7 +461,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(SETTINGS_FILE), r#"{ "model": null }"#).unwrap();
         assert_eq!(Settings::load(&dir), Settings::default());
-        Settings { assistant: Some(Kind::Codex) }.save(&dir).unwrap();
+        Settings { assistant: Some(Kind::Codex), template: None }.save(&dir).unwrap();
         assert_eq!(Settings::load(&dir).assistant, Some(Kind::Codex));
         std::fs::write(dir.join(SETTINGS_FILE), "not json").unwrap();
         assert_eq!(Settings::load(&dir).assistant, None);

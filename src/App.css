@@ -3297,7 +3297,7 @@ button.page-icon:hover {
 
 .setup-options {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
   gap: 10px;
 }
 
@@ -3341,6 +3341,7 @@ button.page-icon:hover {
 .setup-option-name {
   font-size: 15px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .setup-option-by,
@@ -3355,6 +3356,8 @@ button.page-icon:hover {
 }
 
 .setup-badge {
+  flex: none;
+  white-space: nowrap;
   padding: 1px 8px;
   border-radius: 999px;
   background: var(--surface-2);
@@ -3712,4 +3715,27 @@ button.page-icon:hover {
 
 .button.danger-text {
   color: var(--danger);
+}
+
+.show-earlier {
+  align-self: center;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.turn.earlier .message {
+  opacity: 0.72;
+}
+
+.setup-starter {
+  margin-top: 18px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.setup-starter .choice-chips {
+  margin-top: 8px;
 }

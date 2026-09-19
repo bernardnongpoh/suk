@@ -172,22 +172,24 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
       codes: [],
       claude: { installed: !fresh, signed_in: !fresh, account: "prof@example.edu", version: "2.1.273 (Claude Code)" },
       codex: { installed: fresh, signed_in: false, account: null, version: "codex-cli 0.154.0" },
+      gemini: { installed: false, signed_in: false, account: null, version: "0.60.0" },
+      template: null,
     };
     window.__setup = setup;
     const assistantInfo = (kind) => ({
       kind,
-      label: kind === "claude" ? "Claude Code" : "Codex",
+      label: { claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI" }[kind],
       installed: setup[kind].installed,
       version: setup[kind].installed ? setup[kind].version : null,
       signed_in: setup[kind].signed_in,
       account: setup[kind].signed_in ? setup[kind].account : null,
-      install_command: kind === "claude" ? "curl -fsSL https://claude.ai/install.sh | bash" : "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
-      requirement: kind === "claude" ? "a Claude Pro or Max plan, or an Anthropic Console account" : "a ChatGPT Plus, Pro, Business or Enterprise plan",
+      install_command: { claude: "curl -fsSL https://claude.ai/install.sh | bash", codex: "curl -fsSL https://chatgpt.com/codex/install.sh | sh", gemini: "npm install -g --prefix ~/.local @google/gemini-cli" }[kind],
+      requirement: { claude: "a Claude Pro or Max plan, or an Anthropic Console account", codex: "a ChatGPT Plus, Pro, Business or Enterprise plan", gemini: "a Google account (free tier included), a Gemini Code Assist licence, or an API key" }[kind],
     });
     const assistantState = () => ({
       chosen: setup.chosen,
       ready: !!setup.chosen && setup[setup.chosen].installed && setup[setup.chosen].signed_in,
-      assistants: [assistantInfo("claude"), assistantInfo("codex")],
+      assistants: [assistantInfo("claude"), assistantInfo("codex"), assistantInfo("gemini")],
       calendar_status: "needs-auth",
       calendar_help: "To connect Google Calendar, run claude in Terminal, type /mcp, and choose \\"claude.ai Google Calendar\\".",
     });
@@ -360,6 +362,20 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
           case "list_entities": return Object.values(db.entities).filter((e) => e.kind === args.kind);
           case "assistant_status": return assistantState();
           case "choose_assistant": setup.chosen = args.kind; return null;
+          case "templates": return [[
+            { id: "academic", name: "Academic", about: "Professors, postdocs and researchers", adds: ["Students, Projects, Courses and Research areas in the sidebar", "The assistant knows about theses, courses, grants and committees"] },
+            { id: "general", name: "General", about: "Anyone running projects and people", adds: ["People and Projects in the sidebar"] },
+          ], setup.template];
+          case "apply_template": {
+            setup.template = args.id;
+            const wanted = args.id === "academic" ? [["student", "Students"], ["project", "Projects"], ["course", "Courses"], ["research-area", "Research areas"]] : [["person", "People"], ["project", "Projects"]];
+            const added = [];
+            for (const [tag, title] of wanted) {
+              if (!db.sections.some((s) => s.tag === tag)) { db.sections.push({ tag, title, pinned: true, icon: "" }); added.push(title); }
+            }
+            return added;
+          }
+          case "new_conversation": window.__newConversations = (window.__newConversations ?? 0) + 1; return null;
           case "install_assistant": {
             let i = 0;
             for (const line of ["Setting up Claude Code...", "Downloading claude 2.1.273 for darwin-arm64", "✔ Claude Code successfully installed!", "Location: ~/.local/bin/claude"]) {
@@ -371,6 +387,12 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
           }
           case "sign_in_assistant": {
             await wait(300);
+            if (args.kind === "gemini") {
+              channels[args.onPrompt?.id]?.({ index: 0, message: { url: null, code: null, needs_code: false, in_terminal: true } });
+              await new Promise((resolve, reject) => { setup.finishSignIn = resolve; setup.cancelSignIn = reject; });
+              setup.gemini.signed_in = true;
+              return assistantInfo("gemini");
+            }
             const prompt = args.kind === "claude"
               ? { url: "https://claude.com/cai/oauth/authorize?code=true", code: null, needs_code: true }
               : { url: "https://auth.openai.com/codex/device", code: "IB3U-Y26HE", needs_code: false };
@@ -909,6 +931,33 @@ await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-sch
 await sleep(300);
 await shot("47-task-details-dark");
 await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }] });
+
+// A third assistant and the starter template on the setup screen.
+await send("Page.navigate", { url: "http://localhost:1420/?setup=fresh" });
+await sleep(2200);
+setupResults.threeOptions = await texts(".setup-option .setup-option-name");
+await click(".setup-option", "Gemini");
+await sleep(200);
+setupResults.geminiSteps = await texts(".setup-steps > li .setup-step-title");
+await shot("48-setup-gemini");
+await click(".setup-option", "Claude Code");
+await sleep(200);
+await click(".setup-steps .button.primary", "Install");
+await sleep(1400);
+await click(".setup-steps .button.primary", "Sign in");
+await sleep(600);
+await focus(".setup-code-form input");
+await type("code-123");
+await key("Enter");
+await sleep(900);
+setupResults.starters = await texts(".setup-starter .choice-chip");
+await shot("49-setup-template");
+await click(".setup-starter .choice-chip", "Academic");
+await sleep(150);
+await click(".setup-footer .button.primary", "Start");
+await sleep(1200);
+setupResults.afterTemplate = await evaluate("({ sections: [...document.querySelectorAll('.nav-sections .nav-item')].map(n => n.textContent), template: window.__setup.template })");
+await shot("50-academic-sidebar");
 
 results.setup = setupResults;
 results.consoleErrors = consoleErrors;
