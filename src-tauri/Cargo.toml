@@ -1,6 +1,6 @@
 [package]
 name = "suk"
-version = "0.1.0"
+version = "0.2.0"
 description = "Tell it what's going on; it keeps your work in order"
 authors = ["Bernard Nongpoh"]
 edition = "2021"
