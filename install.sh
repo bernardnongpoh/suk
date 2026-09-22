@@ -83,7 +83,7 @@ install_macos() {
   fi
   mkdir -p "$dest"
 
-  step "Installing into $dest…"
+  step "Installing into ${dest}…"
   mount="$TMP/mount"
   mkdir -p "$mount"
   hdiutil attach -nobrowse -quiet -mountpoint "$mount" "$TMP/app.dmg" || fail "Couldn't open the disk image."
