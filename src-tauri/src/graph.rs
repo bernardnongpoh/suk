@@ -146,6 +146,8 @@ const SCHEMA: &[&str] = &[
     "ALTER TABLE Link ADD IF NOT EXISTS until STRING",
     // Things people the user follows did: new papers, homepage changes, feed posts.
     "CREATE NODE TABLE IF NOT EXISTS Activity(id STRING, person STRING, source STRING, kind STRING, title STRING, url STRING, summary STRING, published STRING, found_at INT64, baseline BOOLEAN, relevance STRING, reason STRING, related STRING, seen BOOLEAN, notified BOOLEAN, PRIMARY KEY(id))",
+    // Decisions made in Tidy up: a type kept as it is, or two pages that aren't the same.
+    "CREATE NODE TABLE IF NOT EXISTS Decision(key STRING, PRIMARY KEY(key))",
     // What was last seen at a watched source (a homepage's text), and when it was checked.
     "CREATE NODE TABLE IF NOT EXISTS SourceState(key STRING, value STRING, checked_at INT64, PRIMARY KEY(key))",
 ];
@@ -1071,6 +1073,134 @@ impl Graph {
         Ok(())
     }
 
+    /// Remembers a decision made in Tidy up, so it isn't asked about again.
+    pub fn decide(&self, key: &str) -> Result<(), GraphError> {
+        let conn = Connection::new(&self.db)?;
+        let mut stmt = conn.prepare("MERGE (d:Decision {key: $key})")?;
+        conn.execute(&mut stmt, vec![("key", key.into())])?;
+        Ok(())
+    }
+
+    /// The decisions made in Tidy up.
+    pub fn decisions(&self) -> Result<Vec<String>, GraphError> {
+        let conn = Connection::new(&self.db)?;
+        Ok(conn.query("MATCH (d:Decision) RETURN d.key")?.map(|row| string(&row[0])).collect())
+    }
+
+    /// Each relationship kind in use, with how many there are.
+    pub fn relation_counts(&self) -> Result<Vec<(String, usize)>, GraphError> {
+        let conn = Connection::new(&self.db)?;
+        Ok(conn
+            .query("MATCH ()-[r:Link]->() RETURN r.kind, count(*) ORDER BY count(*) DESC")?
+            .map(|row| (string(&row[0]), match row[1] { Value::Int64(n) => n as usize, _ => 0 }))
+            .collect())
+    }
+
+    /// Each kind of page in use, with how many there are.
+    pub fn kind_counts(&self) -> Result<Vec<(String, usize)>, GraphError> {
+        let conn = Connection::new(&self.db)?;
+        Ok(conn
+            .query("MATCH (e:Entity) RETURN e.kind, count(*) ORDER BY count(*) DESC")?
+            .map(|row| (string(&row[0]), match row[1] { Value::Int64(n) => n as usize, _ => 0 }))
+            .collect())
+    }
+
+    /// A few pairs joined by a relationship kind, as (from name, to name).
+    pub fn links_of_kind(&self, kind: &str, limit: usize) -> Result<Vec<(String, String)>, GraphError> {
+        let conn = Connection::new(&self.db)?;
+        let mut stmt = conn.prepare(&format!(
+            "MATCH (a:Entity)-[r:Link {{kind: $kind}}]->(b:Entity) RETURN a.name, b.name ORDER BY r.created_at LIMIT {limit}"
+        ))?;
+        Ok(conn.execute(&mut stmt, vec![("kind", kind.into())])?.map(|row| (string(&row[0]), string(&row[1]))).collect())
+    }
+
+    /// Renames a relationship kind everywhere, merging into `new` when that already joins the
+    /// same pages. Returns how many were changed.
+    pub fn rename_relation(&self, old: &str, new: &str) -> Result<usize, GraphError> {
+        if !RELATION_KINDS.contains(&new) && !is_relation_name(new) {
+            return Err(GraphError::UnknownRelationKind(new.into()));
+        }
+        let conn = Connection::new(&self.db)?;
+        let mut stmt = conn.prepare("MATCH (a:Entity)-[r:Link {kind: $kind}]->(b:Entity) RETURN a.id, b.id, r.detail, r.since, r.until")?;
+        let pairs: Vec<(String, String, LinkDetails)> = conn
+            .execute(&mut stmt, vec![("kind", old.into())])?
+            .map(|row| {
+                let text = |v: &Value| match v {
+                    Value::String(s) if !s.is_empty() => Some(s.clone()),
+                    _ => None,
+                };
+                (string(&row[0]), string(&row[1]), LinkDetails { detail: text(&row[2]), since: text(&row[3]), until: text(&row[4]) })
+            })
+            .collect();
+        for (from, to, details) in &pairs {
+            self.link_with(from, new, to, details)?;
+            self.unlink(from, old, to)?;
+        }
+        Ok(pairs.len())
+    }
+
+    /// Removes every relationship of a kind; the pages stay. Returns how many went.
+    pub fn remove_relation(&self, kind: &str) -> Result<usize, GraphError> {
+        let conn = Connection::new(&self.db)?;
+        let mut stmt = conn.prepare("MATCH (a:Entity)-[r:Link {kind: $kind}]->(b:Entity) RETURN a.id, b.id")?;
+        let pairs: Vec<(String, String)> = conn.execute(&mut stmt, vec![("kind", kind.into())])?.map(|row| (string(&row[0]), string(&row[1]))).collect();
+        for (from, to) in &pairs {
+            self.unlink(from, kind, to)?;
+        }
+        Ok(pairs.len())
+    }
+
+    /// Makes one page out of two: `keep` gains the other's details, tags, other names,
+    /// relationships and notes, and `remove` is deleted. Its name becomes another name of the
+    /// page kept, so links and searches still find it.
+    pub fn merge(&self, keep_id: &str, remove_id: &str) -> Result<Entity, GraphError> {
+        if keep_id == remove_id {
+            return Err(GraphError::InvalidInfo("a page can't be merged with itself".into()));
+        }
+        let keep = self.get(keep_id)?.ok_or_else(|| GraphError::NotFound(keep_id.into()))?;
+        let remove = self.get(remove_id)?.ok_or_else(|| GraphError::NotFound(remove_id.into()))?;
+        // Details the page kept doesn't have yet.
+        let missing: BTreeMap<String, Option<String>> = remove
+            .info
+            .iter()
+            .filter(|(key, _)| !keep.info.contains_key(*key))
+            .map(|(key, value)| (key.clone(), Some(value.clone())))
+            .collect();
+        if !missing.is_empty() {
+            self.update_info(keep_id, &missing)?;
+        }
+        if !remove.tags.is_empty() {
+            self.add_tags(keep_id, &remove.tags)?;
+        }
+        let mut aliases = keep.aliases.clone();
+        for name in std::iter::once(remove.name.clone()).chain(remove.aliases.clone()) {
+            if !aliases.iter().any(|a| a.eq_ignore_ascii_case(&name)) && !keep.name.eq_ignore_ascii_case(&name) {
+                aliases.push(name);
+            }
+        }
+        for link in self.links(remove_id)? {
+            if link.other.id == keep_id {
+                continue;
+            }
+            let details = LinkDetails { detail: link.detail.clone(), since: link.since.clone(), until: link.until.clone() };
+            if link.outgoing {
+                self.link_with(keep_id, &link.kind, &link.other.id, &details)?;
+            } else {
+                self.link_with(&link.other.id, &link.kind, keep_id, &details)?;
+            }
+        }
+        let notes = match (keep.notes.trim(), remove.notes.trim()) {
+            (a, "") => a.to_string(),
+            ("", b) => b.to_string(),
+            (a, b) => format!("{a}\n{b}"),
+        };
+        self.set_notes(keep_id, &notes)?;
+        // The name is only free to become another name of this page once the other page is gone.
+        self.delete(remove_id)?;
+        self.set_aliases(keep_id, &aliases)?;
+        self.get(keep_id)?.ok_or_else(|| GraphError::NotFound(keep_id.into()))
+    }
+
     /// All sections, pinned or dismissed, in sidebar order.
     pub fn sections(&self) -> Result<Vec<Section>, GraphError> {
         let conn = Connection::new(&self.db)?;
@@ -1613,6 +1743,62 @@ mod tests {
         assert_eq!(g.find_by_name(" COMPILER  fuzzing").unwrap(), Some(project.clone()));
         assert_eq!(g.find_by_name("nobody").unwrap(), None);
         assert_eq!(g.recent_entities(1).unwrap(), vec![project]);
+    }
+
+    #[test]
+    fn two_pages_become_one() {
+        let g = Graph::in_memory().unwrap();
+        let satya = g.upsert_entity("Student", "Satya").unwrap();
+        set(&g, &satya.id, &[("email", "satya@example.edu")]).unwrap();
+        g.set_notes(&satya.id, "Met on Tuesday.").unwrap();
+        let das = g.upsert_entity("Person", "Satya Das").unwrap();
+        set(&g, &das.id, &[("email", "other@example.edu"), ("program", "PhD")]).unwrap();
+        g.set_aliases(&das.id, &["S. Das".into()]).unwrap();
+        g.set_notes(&das.id, "Works on fuzzing.").unwrap();
+        g.add_tags(&das.id, &["reading-group".into()]).unwrap();
+        let fuzzing = g.upsert_entity("Project", "Fuzzing").unwrap();
+        let review = g.upsert_entity("Task", "Review survey").unwrap();
+        g.link(&das.id, "WORKS_ON", &fuzzing.id).unwrap();
+        g.link(&review.id, "FOR", &das.id).unwrap();
+        g.link(&satya.id, "WORKS_ON", &fuzzing.id).unwrap();
+
+        let merged = g.merge(&satya.id, &das.id).unwrap();
+        assert_eq!(merged.name, "Satya");
+        assert_eq!(merged.info["email"], "satya@example.edu", "what the page kept says wins");
+        assert_eq!(merged.info["program"], "PhD", "details it didn't have are taken over");
+        assert_eq!(merged.aliases, vec!["Satya Das", "S. Das"]);
+        assert!(merged.tags.contains(&"student".to_string()) && merged.tags.contains(&"reading-group".to_string()));
+        assert_eq!(merged.notes, "Met on Tuesday.\nWorks on fuzzing.");
+        assert!(g.get(&das.id).unwrap().is_none());
+        assert_eq!(g.find_by_name("Satya Das").unwrap().unwrap().id, satya.id, "the old name still finds the page");
+        let kinds: Vec<String> = g.links(&satya.id).unwrap().into_iter().map(|l| format!("{} {}", l.kind, l.other.name)).collect();
+        assert_eq!(kinds, vec!["WORKS_ON Fuzzing", "FOR Review survey"]);
+        assert!(g.merge(&satya.id, &satya.id).is_err());
+    }
+
+    #[test]
+    fn relationship_kinds_can_be_renamed_merged_and_removed() {
+        let g = Graph::in_memory().unwrap();
+        let kavya = g.upsert_entity("Person", "Kavya").unwrap();
+        let grant = g.upsert_entity("Note", "Grant proposal").unwrap();
+        let paper = g.upsert_entity("Note", "Paper draft").unwrap();
+        g.link_with(&kavya.id, "REVIEWS", &grant.id, &LinkDetails { detail: Some("second reader".into()), ..Default::default() }).unwrap();
+        g.link(&kavya.id, "REVIEWS", &paper.id).unwrap();
+        assert_eq!(g.relation_counts().unwrap().iter().find(|(k, _)| k == "REVIEWS").unwrap().1, 2);
+
+        assert_eq!(g.rename_relation("REVIEWS", "IS_REVIEWING").unwrap(), 2);
+        let links = g.links(&kavya.id).unwrap();
+        assert!(links.iter().all(|l| l.kind == "IS_REVIEWING"));
+        assert_eq!(links.iter().find(|l| l.other.name == "Grant proposal").unwrap().detail.as_deref(), Some("second reader"));
+        assert!(g.rename_relation("IS_REVIEWING", "not a relation").is_err());
+
+        assert_eq!(g.remove_relation("IS_REVIEWING").unwrap(), 2);
+        assert!(g.links(&kavya.id).unwrap().is_empty());
+        assert!(g.kind_counts().unwrap().iter().any(|(k, n)| k == "Note" && *n == 2));
+
+        g.decide("relation:REVIEWS").unwrap();
+        g.decide("relation:REVIEWS").unwrap();
+        assert_eq!(g.decisions().unwrap(), vec!["relation:REVIEWS"]);
     }
 
     #[test]

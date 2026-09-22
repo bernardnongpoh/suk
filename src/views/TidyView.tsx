@@ -121,7 +121,7 @@ function TidyView({ version, onOpen, onChanged }: Props) {
             Merge into {pair.keep.name}
           </button>
           <button className="button small ghost" disabled={busy === key} onClick={() => act(key, () => notDuplicates(pair.keep.id, pair.remove.id))}>
-            Different people
+            {pair.keep.kind === "Person" ? "Different people" : "Different things"}
           </button>
         </div>
       </li>

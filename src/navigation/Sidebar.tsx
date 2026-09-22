@@ -11,6 +11,8 @@ interface Props {
   data: SidebarData | null;
   /** Relevant updates from followed people not yet seen. */
   unread: number;
+  /** Things Suk organized in a new way and wants a decision on. */
+  toTidy: number;
   onSelect: (route: Route) => void;
   onSearch: () => void;
   onOpen: (id: string) => void;
@@ -34,7 +36,7 @@ const isMac = navigator.platform.toLowerCase().includes("mac");
  * usually from a suggestion after mentioning something new; tags in use without a section are
  * offered at the bottom.
  */
-function Sidebar({ route, data, unread, onSelect, onSearch, onOpen, onChanged }: Props) {
+function Sidebar({ route, data, unread, toTidy, onSelect, onSearch, onOpen, onChanged }: Props) {
   const [menu, setMenu] = useState<string | null>(null);
   // The section whose icon is being chosen.
   const [iconFor, setIconFor] = useState<string | null>(null);
@@ -130,6 +132,7 @@ function Sidebar({ route, data, unread, onSelect, onSearch, onOpen, onChanged }:
       <div className="nav-group">
         {item({ view: "today" }, "Today", "today")}
         {item({ view: "chat" }, "Chat", "chat")}
+        {item({ view: "calendar" }, "Calendar", "calendar")}
         {item({ view: "updates" }, "Updates", "bell", unread > 0 && <span className="nav-badge" aria-label={`${unread} new`}>{unread}</span>)}
         {item({ view: "notes" }, "Notes", "notes")}
       </div>
@@ -250,7 +253,11 @@ function Sidebar({ route, data, unread, onSelect, onSearch, onOpen, onChanged }:
         )}
       </div>
 
-      <div className="nav-group nav-bottom">{item({ view: "settings" }, "Settings", "settings")}</div>
+      <div className="nav-group nav-bottom">
+        {toTidy > 0 &&
+          item({ view: "tidy" }, "Tidy up", "sparkle", <span className="nav-count">{toTidy}</span>)}
+        {item({ view: "settings" }, "Settings", "settings")}
+      </div>
     </nav>
   );
 }

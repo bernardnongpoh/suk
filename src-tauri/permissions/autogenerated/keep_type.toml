@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-keep-type"
+description = "Enables the keep_type command without any pre-configured scope."
+commands.allow = ["keep_type"]
+
+[[permission]]
+identifier = "deny-keep-type"
+description = "Denies the keep_type command without any pre-configured scope."
+commands.deny = ["keep_type"]

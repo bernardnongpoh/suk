@@ -1,10 +1,12 @@
 mod assistant;
+mod calendar;
 mod claude;
 #[cfg(test)]
 mod claude_eval;
 mod codex;
 mod commands;
 mod gemini;
+mod google;
 mod graph;
 mod links;
 mod mcp;
@@ -12,6 +14,7 @@ mod migrate;
 mod pages;
 mod relations;
 mod templates;
+mod tidy;
 mod tools;
 mod vault;
 mod watch;
@@ -153,6 +156,25 @@ pub fn run() {
             app.manage(gemini::Gemini::default());
             app.manage(assistant::Notes::default());
             app.manage(assistant::SignIn::default());
+            // The calendar feed: a link the user's own calendar app subscribes to.
+            let mut settings = assistant::Settings::load(&data_dir);
+            let key = settings.calendar_key.clone().unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+            let handle = app.handle().clone();
+            let feed = calendar::start(settings.calendar_port.unwrap_or(calendar::PREFERRED_PORT), key.clone(), move || {
+                let dir = handle.path().app_data_dir().ok()?;
+                (!assistant::Settings::load(&dir).calendar_off).then(|| {
+                    let graph = handle.state::<graph::Graph>();
+                    calendar::ics(&calendar::slots(&graph).unwrap_or_default())
+                })
+            })?;
+            eprintln!("calendar: subscribe at {}", feed.webcal());
+            if settings.calendar_key.as_deref() != Some(key.as_str()) || settings.calendar_port != Some(feed.port) {
+                settings.calendar_key = Some(key);
+                settings.calendar_port = Some(feed.port);
+                let _ = settings.save(&data_dir);
+            }
+            app.manage(feed);
+
             let endpoint = mcp::start(app.handle().clone())?;
             eprintln!("mcp: tools for Claude at {}", endpoint.url);
             app.manage(endpoint);
@@ -193,6 +215,23 @@ pub fn run() {
             commands::open_url,
             commands::assistant_status,
             commands::choose_assistant,
+            commands::google_status,
+            commands::set_google_client,
+            commands::connect_google,
+            commands::disconnect_google,
+            commands::add_task_to_calendar,
+            commands::skip_task_calendar,
+            commands::remove_task_from_calendar,
+            commands::calendar_feed,
+            commands::set_calendar_feed,
+            commands::subscribe_calendar,
+            commands::save_calendar_file,
+            commands::tidy_items,
+            commands::keep_type,
+            commands::rename_type,
+            commands::remove_relation_type,
+            commands::merge_pages,
+            commands::not_duplicates,
             commands::templates,
             commands::apply_template,
             commands::install_assistant,

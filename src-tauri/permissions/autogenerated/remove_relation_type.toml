@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remove-relation-type"
+description = "Enables the remove_relation_type command without any pre-configured scope."
+commands.allow = ["remove_relation_type"]
+
+[[permission]]
+identifier = "deny-remove-relation-type"
+description = "Denies the remove_relation_type command without any pre-configured scope."
+commands.deny = ["remove_relation_type"]

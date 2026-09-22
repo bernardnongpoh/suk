@@ -111,6 +111,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Suk's own Google client, so people who download it just press "Sign in with Google".
+          # Set these as repository secrets; without them the app still runs, with Google off.
+          SUK_GOOGLE_CLIENT_ID: ${{ secrets.SUK_GOOGLE_CLIENT_ID }}
+          SUK_GOOGLE_CLIENT_SECRET: ${{ secrets.SUK_GOOGLE_CLIENT_SECRET }}
         with:
           releaseId: ${{ needs.prepare.outputs.release_id }}
 

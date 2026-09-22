@@ -58,7 +58,7 @@ interface Props {
 }
 
 /** Details shown elsewhere on the page, or internal to the app. */
-const HIDDEN_INFO = ["details_skipped", "title", "icon"];
+const HIDDEN_INFO = ["details_skipped", "title", "icon", "calendar", "calendar_link"];
 
 /** Section heading for a relationship, as seen from the page being viewed. */
 function section(link: Link): string {

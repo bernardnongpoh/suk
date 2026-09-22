@@ -62,6 +62,17 @@ pub struct Settings {
     /// The starter template chosen when setting up ("academic"), if any.
     #[serde(default)]
     pub template: Option<String>,
+    /// The calendar feed's secret path and port, kept so a subscription made once keeps working.
+    #[serde(default)]
+    pub calendar_key: Option<String>,
+    #[serde(default)]
+    pub calendar_port: Option<u16>,
+    /// The Google OAuth client the app signs in with, from Google Cloud Console.
+    #[serde(default)]
+    pub google_client: Option<crate::google::AppClient>,
+    /// True while the user has turned publishing off; the feed then answers nothing.
+    #[serde(default)]
+    pub calendar_off: bool,
 }
 
 const SETTINGS_FILE: &str = "settings.json";
@@ -461,7 +472,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(SETTINGS_FILE), r#"{ "model": null }"#).unwrap();
         assert_eq!(Settings::load(&dir), Settings::default());
-        Settings { assistant: Some(Kind::Codex), template: None }.save(&dir).unwrap();
+        Settings { assistant: Some(Kind::Codex), ..Settings::default() }.save(&dir).unwrap();
         assert_eq!(Settings::load(&dir).assistant, Some(Kind::Codex));
         std::fs::write(dir.join(SETTINGS_FILE), "not json").unwrap();
         assert_eq!(Settings::load(&dir).assistant, None);

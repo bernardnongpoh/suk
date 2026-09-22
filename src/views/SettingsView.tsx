@@ -1,5 +1,25 @@
 import { useEffect, useState } from "react";
-import { applyTemplate, assistantStatus, getVault, openPageFile, templates, type AssistantStatus, type Template, type VaultInfo } from "../api";
+import {
+  applyTemplate,
+  assistantStatus,
+  calendarFeed,
+  connectGoogle,
+  disconnectGoogle,
+  getVault,
+  googleStatus,
+  openPageFile,
+  openUrl,
+  saveCalendarFile,
+  setCalendarFeed,
+  setGoogleClient,
+  subscribeCalendar,
+  templates,
+  type AssistantStatus,
+  type CalendarFeed,
+  type GoogleStatus,
+  type Template,
+  type VaultInfo,
+} from "../api";
 import Icon from "../ui/Icon";
 import { ACCENTS, applyAppearance, loadAppearance, type Appearance, type Theme } from "../ui/appearance";
 
@@ -17,6 +37,13 @@ function SettingsView({ onChangeAssistant, onChanged }: Props) {
   const [starters, setStarters] = useState<Template[]>([]);
   const [starter, setStarter] = useState<string | null>(null);
   const [added, setAdded] = useState<string | null>(null);
+  const [google, setGoogle] = useState<GoogleStatus | null>(null);
+  // While the browser is open waiting for the user to allow access.
+  const [connecting, setConnecting] = useState(false);
+  const [client, setClient] = useState({ id: "", secret: "" });
+  const [feed, setFeed] = useState<CalendarFeed | null>(null);
+  // What just happened with the calendar: the link copied, or the file saved.
+  const [feedNote, setFeedNote] = useState<string | null>(null);
   const [appearance, setAppearance] = useState<Appearance>(loadAppearance);
   const change = (next: Partial<Appearance>) => {
     const value = { ...appearance, ...next };
@@ -31,6 +58,8 @@ function SettingsView({ onChangeAssistant, onChanged }: Props) {
       setStarter(chosen);
     }, () => {});
     getVault().then(setVault, (err) => setError(String(err)));
+    calendarFeed().then(setFeed, () => {});
+    googleStatus().then(setGoogle, () => {});
   }, []);
 
   const current = assistant?.assistants.find((a) => a.kind === assistant.chosen) ?? null;
@@ -123,19 +152,171 @@ function SettingsView({ onChangeAssistant, onChanged }: Props) {
               <Icon name="calendar" size={15} />
             </span>
             <div className="settings-text">
-              <div className="model-name">Google Calendar</div>
+              <div className="model-name">Reading your calendar</div>
               <div className="muted">
                 {assistant.chosen === "codex"
                   ? "Available with Claude Code. With Codex, confirmed plans are saved in the app only."
                   : calendar == null
                     ? "Checked the first time you chat."
                     : calendarConnected
-                      ? "Connected. Confirmed plans are added to your calendar."
+                      ? "Connected, so planning can see what you already have on."
                       : `Not connected. ${assistant.calendar_help}`}
               </div>
             </div>
             <span className={`status-dot${calendarConnected && assistant.chosen === "claude" ? " ok" : ""}`} />
           </div>
+        </div>
+      )}
+
+      <h2 className="section-title">Calendar</h2>
+      {google && (
+        <div className="settings-card">
+          <div className="settings-row">
+            <span className="section-icon">
+              <Icon name="calendar" size={15} />
+            </span>
+            <div className="settings-text">
+              <div className="model-name">Google Calendar</div>
+              <div className="muted">
+                {google.connected
+                  ? `Connected${google.account ? ` as ${google.account}` : ""}. When a task has a day and a time, Suk asks whether to put it on your calendar; nothing goes across until you say yes.`
+                  : google.client_set
+                    ? "Sign in and Suk can add the tasks you approve. It asks only to manage its own events, never to read the rest of your calendar."
+                    : "This copy of Suk was built without Google sign-in. Later releases have it; until then you can point Suk at your own Google project."}
+              </div>
+              {!google.client_set && (
+                <details className="client-form">
+                  <summary className="muted small">Use my own Google project</summary>
+                  <p className="muted small">
+                    From{" "}
+                    <button className="text-button" onClick={() => openUrl("https://console.cloud.google.com/apis/credentials")}>
+                      Google Cloud Console
+                    </button>
+                    : enable the Calendar API, then create an OAuth client ID of type <b>Desktop app</b>.
+                  </p>
+                  <input
+                    className="detail-input"
+                    placeholder="Client ID (ends in .apps.googleusercontent.com)"
+                    value={client.id}
+                    onChange={(e) => setClient({ ...client, id: e.currentTarget.value })}
+                  />
+                  <input
+                    className="detail-input"
+                    placeholder="Client secret"
+                    value={client.secret}
+                    onChange={(e) => setClient({ ...client, secret: e.currentTarget.value })}
+                  />
+                  <button
+                    className="button small"
+                    disabled={!client.id.trim()}
+                    onClick={() =>
+                      setGoogleClient(client.id, client.secret).then(
+                        () => googleStatus().then(setGoogle),
+                        (err) => setError(String(err)),
+                      )
+                    }
+                  >
+                    Save
+                  </button>
+                </details>
+              )}
+            </div>
+            <span className={`status-dot${google.connected ? " ok" : ""}`} />
+            {google.client_set &&
+              (google.connected ? (
+                <button
+                  className="button small ghost"
+                  onClick={() => disconnectGoogle().then(() => googleStatus().then(setGoogle), (err) => setError(String(err)))}
+                >
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  className="button small"
+                  disabled={connecting}
+                  onClick={() => {
+                    setConnecting(true);
+                    setError(null);
+                    connectGoogle()
+                      .then(() => googleStatus().then(setGoogle), (err) => setError(String(err)))
+                      .finally(() => setConnecting(false));
+                  }}
+                >
+                  {connecting ? "Waiting for Google…" : "Sign in with Google"}
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {feed && (
+        <div className="settings-card">
+          <div className="settings-row">
+            <span className="section-icon">
+              <Icon name="calendar" size={15} />
+            </span>
+            <div className="settings-text">
+              <div className="model-name">Other calendar apps</div>
+              <div className="muted">
+                Not using Google? Apple Calendar, Outlook and Thunderbird can subscribe to this link and keep
+                themselves up to date with the time blocks you confirm.
+              </div>
+              <p className="system">
+                <code>{feed.url}</code>
+              </p>
+              <p className="system">
+                {feed.on
+                  ? `${feed.blocks} ${feed.blocks === 1 ? "block is" : "blocks are"} on it. Your calendar app looks again every 15 minutes.`
+                  : "Publishing is off, so the link is empty."}
+              </p>
+            </div>
+            <label className="switch" title={feed.on ? "Stop publishing" : "Publish again"}>
+              <input
+                type="checkbox"
+                checked={feed.on}
+                onChange={(e) => {
+                  const on = e.currentTarget.checked;
+                  setFeed({ ...feed, on });
+                  setCalendarFeed(on).catch((err) => setError(String(err)));
+                }}
+              />
+              <span />
+            </label>
+            <button className="button small" disabled={!feed.on} onClick={() => subscribeCalendar().catch((err) => setError(String(err)))}>
+              Subscribe
+            </button>
+            <button
+              className="button small ghost"
+              onClick={() =>
+                navigator.clipboard.writeText(feed.url).then(
+                  () => setFeedNote("Link copied. In your calendar app, add a calendar by URL and paste it."),
+                  () => setError("Couldn't copy the link."),
+                )
+              }
+            >
+              Copy link
+            </button>
+          </div>
+          <div className="settings-row">
+            <span className="section-icon">
+              <Icon name="download" size={15} />
+            </span>
+            <div className="settings-text">
+              <div className="model-name">A file to import</div>
+              <div className="muted">
+                For a calendar that imports rather than subscribes. Google only reads links it can reach from the internet, and this one lives on your computer. Save the
+                blocks as a file and import it in Google Calendar (Settings → Import &amp; export). Repeat after
+                planning; the same block never comes in twice.
+              </div>
+            </div>
+            <button
+              className="button small"
+              onClick={() => saveCalendarFile().then((path) => setFeedNote(`Saved to ${path}.`), (err) => setError(String(err)))}
+            >
+              Save file
+            </button>
+          </div>
+          {feedNote && <p className="form-note">{feedNote}</p>}
         </div>
       )}
 

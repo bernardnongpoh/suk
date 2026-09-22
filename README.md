@@ -120,6 +120,20 @@ npm run tauri dev                          # run it
 OPENSSL_DIR="$(scripts/static-openssl.sh)" npm run tauri build
 ```
 
+### Google Calendar sign-in
+
+Suk carries its own Google OAuth client, so people who install it just press **Sign in with
+Google**. Builds made without one still run; the calendar section then offers to use your own
+Google project instead.
+
+To make the client (once, for the app): in [Google Cloud
+Console](https://console.cloud.google.com/apis/credentials), enable the **Google Calendar API**,
+then create an **OAuth client ID** of type **Desktop app**. Add the values as the repository
+secrets `SUK_GOOGLE_CLIENT_ID` and `SUK_GOOGLE_CLIENT_SECRET`, which release builds read; locally,
+export them before `npm run tauri dev`. Google treats a desktop client's secret as public — PKCE is
+what protects the exchange — but the app still needs Google's verification for the calendar scope
+before more than 100 people can use it.
+
 ### Branches and releases
 
 - Work happens on **`dev`**; pushes there and pull requests run the tests.

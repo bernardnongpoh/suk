@@ -292,6 +292,22 @@ impl Vault {
         self.target(entity, state.paths.get(&entity.id))
     }
 
+    /// Forgets a page's file, because the page is gone from the app. Without this the file is
+    /// read back on the next sync and the page returns.
+    pub fn remove(&self, entity: &Entity) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let path = self.target(entity, state.paths.get(&entity.id));
+        state.paths.remove(&entity.id);
+        state.known.remove(&path);
+        state.mtimes.remove(&path);
+        state.fingerprint = None;
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("couldn't delete {}: {e}", path.display())),
+        }
+    }
+
     /// Reads files changed in Obsidian into the graph, then writes changed pages out.
     pub fn sync(&self, graph: &Graph) -> Result<SyncReport, String> {
         std::fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
@@ -711,6 +727,24 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(self.vault.root());
         }
+    }
+
+    #[test]
+    fn a_page_deleted_in_the_app_does_not_come_back_from_its_file() {
+        let t = TestVault::new("deleted");
+        let g = &t.graph;
+        let amit = g.upsert_entity("Person", "Amit").unwrap();
+        t.sync();
+        assert!(t.vault.root().join("People/Amit.md").exists());
+
+        g.delete(&amit.id).unwrap();
+        t.vault.remove(&amit).unwrap();
+        assert!(!t.vault.root().join("People/Amit.md").exists(), "the file goes with the page");
+
+        t.sync();
+        assert!(g.find_by_name("Amit").unwrap().is_none(), "and the page stays gone");
+        // Deleting a page whose file was already removed is not an error.
+        t.vault.remove(&amit).unwrap();
     }
 
     #[test]

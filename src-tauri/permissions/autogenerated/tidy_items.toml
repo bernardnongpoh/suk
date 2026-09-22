@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tidy-items"
+description = "Enables the tidy_items command without any pre-configured scope."
+commands.allow = ["tidy_items"]
+
+[[permission]]
+identifier = "deny-tidy-items"
+description = "Denies the tidy_items command without any pre-configured scope."
+commands.deny = ["tidy_items"]

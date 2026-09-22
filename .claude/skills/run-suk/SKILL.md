@@ -57,7 +57,9 @@ node .claude/skills/run-suk/drive.mjs "$SCRATCH"
 offers a "Who is …?" card (role chips, profile-link fill, missing fields) and a
 section; typing an existing name ("Sat…", "Fuz…") shows the mention popover and
 Tab picks it (highlighted, sent as `mentions`); ⌘K opens a person's page; the
-Students section; Today. It prints a JSON result (including console errors) and
+Students section; Today and its tabs; the Calendar in week and month; Google Calendar sign-in and
+the question before a task is added; Tidy up (keeping a new relationship, merging two pages
+for one student, renaming a new kind of page). It prints a JSON result (including console errors) and
 numbered screenshots. **Look at the screenshots.** Restart headless Chrome
 between runs: an old session's injected stub can linger. Headless Chrome doesn't
 show WebKit-only problems: after a change to fonts or CSS, also check the

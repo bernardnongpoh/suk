@@ -449,6 +449,62 @@ export const updateDetails = (id: string, changes: Record<string, string | null>
   invoke<Entity>("update_details", { id, changes });
 
 /** A relationship or page type Suk started using, waiting to be kept, renamed or removed. */
+/** A task with a date and a time that Suk hasn't asked about yet. */
+export interface CalendarOffer {
+  task: Entity;
+  start: string;
+  end: string;
+  /** How it reads in the question: "Thu 18 Sep, 11:00". */
+  when: string;
+}
+
+/** Whether Suk can put things on Google Calendar, and what is waiting to be asked. */
+export interface GoogleStatus {
+  client_set: boolean;
+  connected: boolean;
+  account: string | null;
+  offers: CalendarOffer[];
+}
+
+export const googleStatus = () => invoke<GoogleStatus>("google_status");
+
+/** Saves the OAuth client from Google Cloud Console. */
+export const setGoogleClient = (id: string, secret: string) => invoke<void>("set_google_client", { id, secret });
+
+/** Opens Google in the browser; resolves with the account once access is allowed. */
+export const connectGoogle = () => invoke<string>("connect_google");
+
+export const disconnectGoogle = () => invoke<void>("disconnect_google");
+
+/** Says yes to the question: the task goes on Google Calendar. Returns its link. */
+export const addTaskToCalendar = (id: string) => invoke<string>("add_task_to_calendar", { id });
+
+/** Says no: the question stops coming back for this task. */
+export const skipTaskCalendar = (id: string) => invoke<void>("skip_task_calendar", { id });
+
+/** Takes the task's event back off the calendar. */
+export const removeTaskFromCalendar = (id: string) => invoke<void>("remove_task_from_calendar", { id });
+
+/** Where the user's calendar app subscribes, and what is on the feed. */
+export interface CalendarFeed {
+  webcal: string;
+  url: string;
+  on: boolean;
+  blocks: number;
+  file: string;
+}
+
+export const calendarFeed = () => invoke<CalendarFeed>("calendar_feed");
+
+/** Turns publishing on or off; off, the link answers nothing. */
+export const setCalendarFeed = (on: boolean) => invoke<void>("set_calendar_feed", { on });
+
+/** Hands the link to the calendar app, which asks whether to subscribe. */
+export const subscribeCalendar = () => invoke<void>("subscribe_calendar");
+
+/** Saves the blocks as a file to import into Google Calendar, and shows it. */
+export const saveCalendarFile = () => invoke<string>("save_calendar_file");
+
 export interface NewType {
   name: string;
   /** How it reads on a page: "reviews", "Grant". */

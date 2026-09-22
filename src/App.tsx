@@ -3,15 +3,17 @@ import { listen } from "@tauri-apps/api/event";
 import Sidebar from "./navigation/Sidebar";
 import ChatView from "./chat/ChatView";
 import SearchPalette from "./search/SearchPalette";
+import CalendarView from "./views/CalendarView";
 import TodayView from "./views/TodayView";
 import NotesView from "./views/NotesView";
 import PageView from "./views/PageView";
 import SectionView from "./views/SectionView";
 import SettingsView from "./views/SettingsView";
+import TidyView from "./views/TidyView";
 import UpdatesView from "./views/UpdatesView";
 import Icon from "./ui/Icon";
 import Setup from "./onboarding/Setup";
-import { assistantStatus, getSidebar, listUpdates, newConversation, type Sidebar as SidebarData } from "./api";
+import { assistantStatus, getSidebar, listUpdates, newConversation, tidyItems, type Sidebar as SidebarData } from "./api";
 import type { ChatMessage, Route } from "./types";
 import "./App.css";
 
@@ -36,6 +38,8 @@ function App() {
   // Relevant updates from followed people not yet seen, and the latest arrival to announce.
   const [unread, setUnread] = useState(0);
   const [toast, setToast] = useState<{ title: string; body: string } | null>(null);
+  // New relationships, page types and possible duplicates waiting for a decision.
+  const [toTidy, setToTidy] = useState(0);
 
   // Whether Claude Code or Codex is set up: null while checking. The app can't run without one.
   const [ready, setReady] = useState<boolean | null>(null);
@@ -72,6 +76,10 @@ function App() {
   }, []);
 
   useEffect(countUnread, [countUnread, version]);
+
+  useEffect(() => {
+    tidyItems().then((items) => setToTidy(items.count), () => {});
+  }, [version]);
 
   useEffect(() => {
     if (!toast) return;
@@ -134,6 +142,7 @@ function App() {
         route={route}
         data={sidebar}
         unread={unread}
+        toTidy={toTidy}
         onSelect={select}
         onSearch={() => setSearching(true)}
         onOpen={open}
@@ -146,6 +155,7 @@ function App() {
             onOpen={open}
             onUpdates={() => select({ view: "updates" })}
             onChanged={changed}
+            onSettings={() => select({ view: "settings" })}
             onPlan={() => {
               setChatPrompt(PLAN_PROMPT);
               select({ view: "chat" });
@@ -163,6 +173,7 @@ function App() {
             onOpen={open}
           />
         )}
+        {route.view === "calendar" && <CalendarView version={version} onOpen={open} />}
         {route.view === "updates" && <UpdatesView version={version} onOpen={open} />}
         {route.view === "notes" && <NotesView version={version} onOpen={open} onChanged={changed} />}
         {route.view === "section" && (
@@ -193,6 +204,7 @@ function App() {
             onChanged={changed}
           />
         )}
+        {route.view === "tidy" && <TidyView version={version} onOpen={open} onChanged={changed} />}
         {route.view === "settings" && <SettingsView onChangeAssistant={() => setChangingAssistant(true)} onChanged={changed} />}
       </main>
       {toast && (
