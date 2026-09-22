@@ -181,7 +181,7 @@ export interface ChatStatus {
   status: string;
 }
 
-export type AssistantKind = "claude" | "codex";
+export type AssistantKind = "claude" | "codex" | "gemini";
 
 /** Where an assistant stands on this computer. */
 export interface AssistantInfo {
@@ -215,6 +215,8 @@ export interface SignInPrompt {
   code: string | null;
   /** Claude Code: the page shows a code to paste back. */
   needs_code: boolean;
+  /** Gemini CLI: finish signing in in the terminal window that opened. */
+  in_terminal: boolean;
 }
 
 function statusChannel(onStatus: (status: string) => void) {
@@ -247,6 +249,9 @@ export const confirmProposal = (
   invoke<ChatReply>("confirm_proposal", { id, items, onStatus: statusChannel(onStatus) });
 
 export const dismissProposal = (id: string) => invoke<Proposal>("dismiss_proposal", { id });
+
+/** Starts a new conversation: the assistant begins fresh, with a short summary of what's recent. */
+export const newConversation = () => invoke<void>("new_conversation");
 
 export const chatHistory = (focus: string | null) =>
   invoke<ChatRecord[]>("chat_history", { focus });
@@ -318,6 +323,20 @@ export const listEntities = (kind: EntityKind) =>
   invoke<Entity[]>("list_entities", { kind });
 
 export const getEntity = (id: string) => invoke<EntityDetail>("get_entity", { id });
+
+/** A starter setup: the sections it adds and what the assistant is told about your work. */
+export interface Template {
+  id: string;
+  name: string;
+  about: string;
+  adds: string[];
+}
+
+/** The templates on offer, and the one in use. */
+export const templates = () => invoke<[Template[], string | null]>("templates");
+
+/** Adds a template's sections and remembers the choice; returns the sections added. */
+export const applyTemplate = (id: string) => invoke<string[]>("apply_template", { id });
 
 export const assistantStatus = () => invoke<AssistantStatus>("assistant_status");
 
@@ -428,3 +447,103 @@ export const setFavorite = (id: string, favorite: boolean) => invoke<Entity>("se
 /** Edits a page's details: a string sets one, null removes it. */
 export const updateDetails = (id: string, changes: Record<string, string | null>) =>
   invoke<Entity>("update_details", { id, changes });
+
+/** A relationship or page type Suk started using, waiting to be kept, renamed or removed. */
+/** A task with a date and a time that Suk hasn't asked about yet. */
+export interface CalendarOffer {
+  task: Entity;
+  start: string;
+  end: string;
+  /** How it reads in the question: "Thu 18 Sep, 11:00". */
+  when: string;
+}
+
+/** Whether Suk can put things on Google Calendar, and what is waiting to be asked. */
+export interface GoogleStatus {
+  client_set: boolean;
+  connected: boolean;
+  account: string | null;
+  offers: CalendarOffer[];
+}
+
+export const googleStatus = () => invoke<GoogleStatus>("google_status");
+
+/** Saves the OAuth client from Google Cloud Console. */
+export const setGoogleClient = (id: string, secret: string) => invoke<void>("set_google_client", { id, secret });
+
+/** Opens Google in the browser; resolves with the account once access is allowed. */
+export const connectGoogle = () => invoke<string>("connect_google");
+
+export const disconnectGoogle = () => invoke<void>("disconnect_google");
+
+/** Says yes to the question: the task goes on Google Calendar. Returns its link. */
+export const addTaskToCalendar = (id: string) => invoke<string>("add_task_to_calendar", { id });
+
+/** Says no: the question stops coming back for this task. */
+export const skipTaskCalendar = (id: string) => invoke<void>("skip_task_calendar", { id });
+
+/** Takes the task's event back off the calendar. */
+export const removeTaskFromCalendar = (id: string) => invoke<void>("remove_task_from_calendar", { id });
+
+/** Where the user's calendar app subscribes, and what is on the feed. */
+export interface CalendarFeed {
+  webcal: string;
+  url: string;
+  on: boolean;
+  blocks: number;
+  file: string;
+}
+
+export const calendarFeed = () => invoke<CalendarFeed>("calendar_feed");
+
+/** Turns publishing on or off; off, the link answers nothing. */
+export const setCalendarFeed = (on: boolean) => invoke<void>("set_calendar_feed", { on });
+
+/** Hands the link to the calendar app, which asks whether to subscribe. */
+export const subscribeCalendar = () => invoke<void>("subscribe_calendar");
+
+/** Saves the blocks as a file to import into Google Calendar, and shows it. */
+export const saveCalendarFile = () => invoke<string>("save_calendar_file");
+
+export interface NewType {
+  name: string;
+  /** How it reads on a page: "reviews", "Grant". */
+  label: string;
+  count: number;
+  /** A few examples: sentences for relationships, page names for types. */
+  examples: string[];
+}
+
+/** Two pages that may be the same thing. */
+export interface DuplicatePair {
+  keep: Entity;
+  remove: Entity;
+  /** Why they look alike, e.g. "Satya is part of Satya Das". */
+  reason: string;
+}
+
+export interface TidyItems {
+  relations: NewType[];
+  kinds: NewType[];
+  duplicates: DuplicatePair[];
+  /** Everything above, for the sidebar count. */
+  count: number;
+}
+
+export const tidyItems = () => invoke<TidyItems>("tidy_items");
+
+/** Keeps a new relationship or page type as it is, so it stops being offered for tidying. */
+export const keepType = (what: "relation" | "kind", name: string) => invoke<void>("keep_type", { what, name });
+
+/** Renames a type everywhere, or merges it into an existing one by giving that name. */
+export const renameType = (what: "relation" | "kind", name: string, newName: string) =>
+  invoke<void>("rename_type", { what, name, newName });
+
+/** Removes a relationship type: the relationships of that kind are deleted (pages stay). */
+export const removeRelationType = (name: string) => invoke<void>("remove_relation_type", { name });
+
+/** Merges two pages into one, keeping everything both had. */
+export const mergePages = (keep: string, remove: string) => invoke<Entity>("merge_pages", { keep, remove });
+
+/** Marks two pages as different, so they're not offered as duplicates again. */
+export const notDuplicates = (a: string, b: string) => invoke<void>("not_duplicates", { a, b });

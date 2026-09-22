@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-not-duplicates"
+description = "Enables the not_duplicates command without any pre-configured scope."
+commands.allow = ["not_duplicates"]
+
+[[permission]]
+identifier = "deny-not-duplicates"
+description = "Denies the not_duplicates command without any pre-configured scope."
+commands.deny = ["not_duplicates"]

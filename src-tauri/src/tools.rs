@@ -284,60 +284,48 @@ pub fn definitions() -> Value {
             }
         },
         {
-            "name": "save",
-            "description": "Create an entity, or update the details, roles and tags of an existing one with the same name. Everyone (students, collaborators, colleagues) is a Person; how they relate to the user goes in roles. Details merge with what is stored; set a detail to null to remove it. Roles and tags are added. Returns the stored entity.",
+            "name": "record",
+            "description": "Save everything a message tells you in one call: pages (created, or updated when the name or another name matches) with details, roles, tags, aliases and a note line, then relationships between them. Details merge; null removes one. Returns a line per item.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "type": { "enum": kinds },
-                    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
-                    "info": {
-                        "type": "object",
-                        "description": "Lowercase snake_case keys with short text values. For tasks: due (YYYY-MM-DD or YYYY-MM-DDTHH:MM), priority (high, medium, low), status (open, waiting, done), area.",
-                        "additionalProperties": { "type": ["string", "null"] }
-                    },
-                    "roles": {
+                    "pages": {
                         "type": "array",
-                        "description": "For a Person: how they are connected to the user.",
-                        "items": { "enum": ROLES }
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": { "enum": kinds },
+                                "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+                                "info": { "type": "object", "description": "snake_case keys, short text values", "additionalProperties": { "type": ["string", "null"] } },
+                                "roles": { "type": "array", "items": { "enum": ROLES }, "description": "Person: how they're connected to the user" },
+                                "tags": { "type": "array", "items": { "type": "string", "maxLength": 40 }, "maxItems": 10 },
+                                "aliases": { "type": "array", "items": { "type": "string", "maxLength": 120 }, "maxItems": 10 },
+                                "note": { "type": "string", "maxLength": 2000, "description": "One line for the page's notes; [[Name]] links pages" }
+                            },
+                            "required": ["type", "name"]
+                        }
                     },
-                    "aliases": {
+                    "links": {
                         "type": "array",
-                        "description": "Other names the page is known by (IITG and Indian Institute of Technology Guwahati for IIT Guwahati). Added to any already stored.",
-                        "items": { "type": "string", "maxLength": 120 },
-                        "maxItems": 10
-                    },
-                    "tags": {
-                        "type": "array",
-                        "description": "Short groupings such as phd, nba-accreditation or reading-group. The type is already a tag.",
-                        "items": { "type": "string", "maxLength": 40 },
-                        "maxItems": 10
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "from": { "type": "string" },
+                                "relation": { "enum": relations },
+                                "to": { "type": "string" },
+                                "detail": { "type": "string", "maxLength": 120, "description": "Position or degree" },
+                                "since": { "type": "string" },
+                                "until": { "type": "string" }
+                            },
+                            "required": ["from", "relation", "to"]
+                        }
                     }
-                },
-                "required": ["type", "name"]
-            }
-        },
-        {
-            "name": "link",
-            "description": "Record a relationship between two entities, or update its details. Give from_type/to_type to create an endpoint that doesn't exist yet. Other names (aliases) find existing pages.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "from": { "type": "string" },
-                    "relation": { "enum": relations },
-                    "to": { "type": "string" },
-                    "from_type": { "enum": kinds },
-                    "to_type": { "enum": kinds },
-                    "detail": { "type": "string", "maxLength": 120, "description": "Position for AFFILIATED_WITH (Associate Professor), degree for STUDIED_AT (PhD). Empty string clears it." },
-                    "since": { "type": "string", "description": "YYYY, YYYY-MM or YYYY-MM-DD. Empty string clears it." },
-                    "until": { "type": "string", "description": "When it ended: YYYY, YYYY-MM or YYYY-MM-DD. Empty string clears it." }
-                },
-                "required": ["from", "relation", "to"]
+                }
             }
         },
         {
             "name": "rename",
-            "description": "Change a page's name, the title it is shown and linked under. It stays the same page: details, relationships, tasks, notes and conversations are kept, and its Obsidian file is renamed.",
+            "description": "Change a page's name, the title it is shown and linked under. It stays the same page: details, relationships, tasks, notes and conversations are kept, and its Markdown file is renamed.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -358,18 +346,6 @@ pub fn definitions() -> Value {
                     "to": { "type": "string" }
                 },
                 "required": ["from", "relation", "to"]
-            }
-        },
-        {
-            "name": "add_note",
-            "description": "Append a line to an entity's notes page, for context that doesn't fit its details: what was discussed or decided, preferences, progress. The app adds today's date. Write [[Name]] to link other pages.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "name": { "type": "string" },
-                    "text": { "type": "string", "minLength": 1, "maxLength": 2000 }
-                },
-                "required": ["name", "text"]
             }
         },
         {
@@ -478,6 +454,7 @@ pub fn call(ctx: &Ctx, name: &str, args: Value) -> Result<String, String> {
         "list" => list(graph, parse(args)?),
         "tasks" => tasks(graph, parse(args)?),
         "people_at" => people_at(graph, parse(args)?),
+        "record" => record(ctx, parse(args)?),
         "save" => save(ctx, parse(args)?),
         "link" => link(ctx, parse(args)?),
         "unlink" => unlink(ctx, parse(args)?),
@@ -734,7 +711,18 @@ fn save(ctx: &Ctx, args: SaveArgs) -> Result<String, String> {
         return Err(format!("unknown type {}", args.kind));
     }
     check_name(&args.name)?;
-    let mut entity = graph.upsert_entity(&args.kind, &args.name).map_err(db)?;
+    // Someone called by their full name ("Satya Prakash Das") is the page with that full name
+    // ("Satya"), not a new one.
+    let name = match graph.find_by_name(&args.name).map_err(db)? {
+        Some(_) => args.name.clone(),
+        None => graph
+            .entities_of_kind("Person")
+            .map_err(db)?
+            .into_iter()
+            .find(|p| p.info.get("full_name").is_some_and(|f| f.eq_ignore_ascii_case(args.name.trim())))
+            .map_or(args.name.clone(), |p| p.name),
+    };
+    let mut entity = graph.upsert_entity(&args.kind, &name).map_err(db)?;
     ctx.activity.touch(&entity.id);
     // A person's affiliation becomes a link to the organization's page, not text.
     let mut info = args.info.clone();
@@ -774,7 +762,7 @@ fn save(ctx: &Ctx, args: SaveArgs) -> Result<String, String> {
     if !entity.aliases.is_empty() {
         result["saved"]["also_called"] = json!(entity.aliases);
     }
-    if resolve_kind(&args.kind).map(|(k, _)| k) != Some(entity.kind.as_str()) {
+    if resolve_kind(&args.kind).map(|(k, _)| k) != Some(entity.kind.clone()) {
         result["note"] = format!(
             "\"{}\" already exists as a {}; names are unique across types, so that entity was updated.",
             entity.name, entity.kind
@@ -782,6 +770,115 @@ fn save(ctx: &Ctx, args: SaveArgs) -> Result<String, String> {
         .into();
     }
     Ok(result.to_string())
+}
+
+#[derive(Deserialize)]
+struct RecordArgs {
+    #[serde(default)]
+    pages: Vec<RecordPage>,
+    #[serde(default)]
+    links: Vec<LinkArgs>,
+}
+
+#[derive(Deserialize)]
+struct RecordPage {
+    #[serde(flatten)]
+    page: SaveArgs,
+    /// A line for the page's notes.
+    note: Option<String>,
+    /// Written beside info often enough to accept here too.
+    status: Option<String>,
+    due: Option<String>,
+    priority: Option<String>,
+}
+
+impl RecordPage {
+    /// Details written beside `info` belong in it.
+    fn page(mut self) -> SaveArgs {
+        for (key, value) in [("status", self.status), ("due", self.due), ("priority", self.priority)] {
+            if let Some(value) = value {
+                self.page.info.entry(key.to_string()).or_insert(Some(value));
+            }
+        }
+        self.page
+    }
+}
+
+/// Saves everything a message mentions in one call: pages with their details and notes, then the
+/// links between them. Each item succeeds or fails on its own; the reply is a short line per item.
+fn record(ctx: &Ctx, args: RecordArgs) -> Result<String, String> {
+    let mut lines = Vec::new();
+    let mut failed = 0;
+    for entry in args.pages {
+        let note = entry.note.clone();
+        let page = entry.page();
+        let name = page.name.clone();
+        match save(ctx, page) {
+            Ok(result) => {
+                let result: Value = serde_json::from_str(&result).unwrap_or_default();
+                lines.push(saved_line(&result));
+                if let Some(text) = note.filter(|n| !n.trim().is_empty()) {
+                    let saved_name = result["saved"]["name"].as_str().unwrap_or(&name).to_string();
+                    match add_note(ctx, NoteArgs { name: saved_name, text }) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            failed += 1;
+                            lines.push(format!("Note for {name} not saved: {e}"));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                lines.push(format!("{name} not saved: {e}"));
+            }
+        }
+    }
+    for l in args.links {
+        let what = format!("{} {} {}", l.from, l.relation, l.to);
+        match link(ctx, l) {
+            Ok(text) => lines.push(text),
+            Err(e) => {
+                failed += 1;
+                lines.push(format!("Not linked ({what}): {e}"));
+            }
+        }
+    }
+    if lines.is_empty() {
+        return Err("nothing to record".into());
+    }
+    if failed == lines.len() {
+        return Err(lines.join("\n"));
+    }
+    Ok(lines.join("\n"))
+}
+
+/// "Saved Satya Das (Person; student; email satya@example.edu)" from `save`'s result.
+fn saved_line(result: &Value) -> String {
+    let saved = &result["saved"];
+    let mut parts = vec![saved["type"].as_str().unwrap_or_default().to_string()];
+    let kind_tag = crate::graph::kind_tag(saved["type"].as_str().unwrap_or_default());
+    let tags: Vec<&str> = saved["tags"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|t| *t != kind_tag).collect();
+    if !tags.is_empty() {
+        parts.push(tags.join(", "));
+    }
+    let details: Vec<String> = saved["info"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(k, _)| k.as_str() != "icon")
+        .map(|(k, v)| format!("{k} {}", v.as_str().unwrap_or_default()))
+        .collect();
+    if !details.is_empty() {
+        parts.push(details.join(", "));
+    }
+    let mut line = format!("Saved {} ({})", saved["name"].as_str().unwrap_or_default(), parts.join("; "));
+    for key in ["affiliation", "note"] {
+        if let Some(text) = result[key].as_str() {
+            line.push_str(&format!(". {text}"));
+        }
+    }
+    line
 }
 
 #[derive(Deserialize)]
@@ -1001,6 +1098,9 @@ fn follow(ctx: &Ctx, args: FollowArgs) -> Result<String, String> {
         "checked": info.sources.iter().map(|s| format!("{} ({})", s.label, s.url)).collect::<Vec<_>>(),
         "not_checkable": info.unsupported,
     });
+    if !info.unsupported.is_empty() {
+        result["tell_user"] = format!("{} can't be checked automatically (those sites block apps); the links are kept on the page.", info.unsupported.join(" and ")).into();
+    }
     if follow && !info.has_papers {
         let name = person.info.get("full_name").cloned().unwrap_or_else(|| person.name.clone());
         match watch::author_candidates(ctx.fetch, &name) {
@@ -1224,6 +1324,62 @@ mod tests {
     }
 
     #[test]
+    fn record_takes_status_due_and_priority_written_beside_info() {
+        let (g, p) = setup();
+        run(&g, &p, "record", json!({"pages": [
+            {"type": "Project", "name": "Fuzzing", "status": "in progress"},
+            {"type": "Task", "name": "Review survey", "due": "2026-09-18", "priority": "high", "info": {"area": "students"}}
+        ]})).unwrap();
+        assert_eq!(g.find_by_name("Fuzzing").unwrap().unwrap().info["status"], "in-progress");
+        let task = g.find_by_name("Review survey").unwrap().unwrap();
+        assert_eq!((task.info["due"].as_str(), task.info["priority"].as_str(), task.info["area"].as_str()), ("2026-09-18", "high", "students"));
+    }
+
+    #[test]
+    fn a_full_name_finds_the_person_saved_by_first_name() {
+        let (g, p) = setup();
+        run(&g, &p, "record", json!({"pages": [{"type": "Person", "name": "Satya", "info": {"full_name": "Satya Prakash Das"}}]})).unwrap();
+        let reply = run(&g, &p, "record", json!({"pages": [{"type": "Person", "name": "Satya Prakash Das", "note": "Starting with the Rust compiler"}]})).unwrap();
+        assert!(reply.as_str().unwrap().starts_with("Saved Satya ("), "{reply}");
+        assert_eq!(g.entities_of_kind("Person").unwrap().len(), 1);
+        assert!(g.find_by_name("Satya").unwrap().unwrap().notes.contains("Rust compiler"));
+    }
+
+    #[test]
+    fn record_saves_pages_notes_and_links_in_one_call() {
+        let (g, p) = setup();
+        let a = Activity::default();
+        let reply = run_with(&g, &p, &a, "record", json!({
+            "pages": [
+                {"type": "Person", "name": "Satya Das", "roles": ["student"], "info": {"email": "satya@example.edu", "program": "PhD"}, "note": "Wants to start with LLVM"},
+                {"type": "Project", "name": "Compiler Fuzzing", "info": {"status": "in progress", "icon": "🐛"}},
+                {"type": "Task", "name": "Review Satya's survey", "info": {"due": "not a date"}},
+                {"type": "Person", "name": "me@example.edu"}
+            ],
+            "links": [
+                {"from": "Satya Das", "relation": "WORKS_ON", "to": "Compiler Fuzzing"},
+                {"from": "Satya Das", "relation": "WORKS_ON", "to": "Nowhere"}
+            ]
+        })).unwrap();
+        let reply = reply.as_str().unwrap();
+        println!("{reply}");
+        let lines: Vec<&str> = reply.lines().collect();
+        assert_eq!(lines.len(), 6, "a line per item");
+        assert_eq!(lines[0], "Saved Satya Das (Person; student; email satya@example.edu, program PhD)");
+        assert_eq!(lines[1], "Saved Compiler Fuzzing (Project; status in-progress)");
+        assert!(lines[2].starts_with("Review Satya's survey not saved:") && lines[2].contains("due"), "{}", lines[2]);
+        assert!(lines[3].contains("not a name"));
+        assert_eq!(lines[4], "Linked: Satya Das works on Compiler Fuzzing.");
+        assert!(lines[5].starts_with("Not linked (Satya Das WORKS_ON Nowhere)"));
+        let satya = g.find_by_name("Satya Das").unwrap().unwrap();
+        assert!(satya.notes.contains("Wants to start with LLVM"));
+        assert!(a.take().0.contains(&satya.id));
+        // Everything failing is an error.
+        assert!(run(&g, &p, "record", json!({"pages": [{"type": "Person", "name": "x@y.z"}]})).is_err());
+        assert!(run(&g, &p, "record", json!({})).is_err());
+    }
+
+    #[test]
     fn wrong_notes_are_corrected_or_removed() {
         let (g, p) = setup();
         let a = Activity::default();
@@ -1356,7 +1512,7 @@ mod tests {
         let listed = run(&g, &p, "list", json!({"type": "Student"})).unwrap();
         assert_eq!(listed[0]["tags"], json!(["person", "student", "phd"]));
         let names: Vec<_> = definitions().as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
-        assert!(names.contains(&"add_note".to_string()) && names.contains(&"suggest_section".to_string()));
+        assert!(names.contains(&"record".to_string()) && names.contains(&"suggest_section".to_string()));
         assert!(!definitions().to_string().contains("LINKS_TO"));
 
         // Links: only those the user gave in this turn.
@@ -1486,7 +1642,8 @@ mod tests {
     #[test]
     fn invalid_calls_are_errors_for_claude() {
         let (g, p) = setup();
-        assert!(run(&g, &p, "save", json!({"type": "Robot", "name": "R2"})).is_err());
+        assert!(run(&g, &p, "save", json!({"type": "robot", "name": "R2"})).is_err());
+        assert_eq!(run(&g, &p, "save", json!({"type": "Grant", "name": "SERB CRG"})).unwrap()["saved"]["type"], "Grant");
         assert!(run(&g, &p, "save", json!({"type": "Student", "name": "A", "info": {"E-mail": "x"}})).is_err());
         let missing = run(&g, &p, "link", json!({"from": "Amit", "relation": "WORKS_ON", "to": "Fuzzing"}));
         assert!(missing.unwrap_err().contains("save it first"));

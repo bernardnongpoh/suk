@@ -12,11 +12,16 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::assistant::{self, Kind, Notes, Settings, SignIn, SignInPrompt};
 use crate::claude::{self, Claude, Turn};
 use crate::codex::{self, Codex};
+use crate::gemini::{self, Gemini};
 use crate::graph::{Affiliation, ChatRecord, Entity, Graph, GraphError, Link, LinkDetails, TaskQuery, ROLES};
 use crate::links;
 use crate::mcp::Endpoint;
 use crate::pages::{self, DetailsRequest, Hit, SectionIdea, TaskItem, DETAILS_SKIPPED};
+use crate::templates::{self, Template};
+use crate::tidy::{self, TidyItems};
 use crate::tools::{self, Activity, Proposal, Proposals};
+use crate::calendar::{self, Feed};
+use crate::google;
 use crate::vault::{self, Vault};
 use crate::watch::{self, AuthorCandidate, WatchInfo, Watcher};
 
@@ -62,13 +67,62 @@ fn chosen(app: &AppHandle) -> Option<Kind> {
 fn assistant_turn(app: &AppHandle, message: &str, on_status: &mut dyn FnMut(&str)) -> Result<Turn, String> {
     let kind = chosen(app).ok_or("No assistant is set up")?;
     let binary = assistant::find(kind).ok_or_else(|| format!("{} isn't installed", kind.label()))?;
-    let content = app.state::<Notes>().with_message(message);
+    let mut content = app.state::<Notes>().with_message(message);
     let mcp = app.state::<Endpoint>().inner().clone();
     let dir = data_dir(app)?;
+    // A new session (each day, or when the conversation grows long) starts with a short summary of
+    // the last messages instead of re-reading the whole history.
+    let brief = || pages::recent_brief(&app.state::<Graph>()).unwrap_or_default();
+    let about_user = templates::instructions(Settings::load(&dir).template.as_deref());
     match kind {
-        Kind::Claude => app.state::<Claude>().send(&claude::Setup { binary, workdir: dir.join("claude"), mcp }, &content, on_status),
-        Kind::Codex => app.state::<Codex>().send(&codex::Setup { binary, workdir: dir.join("codex"), mcp }, &content, on_status),
+        Kind::Claude => {
+            let setup = claude::Setup { binary, workdir: dir.join("claude"), mcp, about_user };
+            let claude = app.state::<Claude>();
+            if claude.begins_fresh(&setup) {
+                content = format!("{}{content}", brief());
+            }
+            claude.send(&setup, &content, on_status)
+        }
+        Kind::Codex => {
+            let setup = codex::Setup { binary, workdir: dir.join("codex"), mcp, about_user };
+            let codex = app.state::<Codex>();
+            if codex.begins_fresh(&setup) {
+                content = format!("{}{content}", brief());
+            }
+            codex.send(&setup, &content, on_status)
+        }
+        Kind::Gemini => {
+            let setup = gemini::Setup { binary, workdir: dir.join("gemini"), mcp, about_user };
+            let gemini = app.state::<Gemini>();
+            if gemini.begins_fresh(&setup) {
+                content = format!("{}{content}", brief());
+            }
+            gemini.send(&setup, &content, on_status)
+        }
     }
+}
+
+/// Starts a new conversation: the assistant forgets the exchange so far and begins the next
+/// message fresh, with a short summary. Everything said stays in the app.
+#[tauri::command]
+pub async fn new_conversation(app: AppHandle) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    let mcp = app.state::<Endpoint>().inner().clone();
+    match chosen(&app) {
+        Some(Kind::Gemini) => {
+            let binary = assistant::find(Kind::Gemini).unwrap_or_default();
+            app.state::<Gemini>().start_over(&gemini::Setup { binary, workdir: dir.join("gemini"), mcp, about_user: String::new() });
+        }
+        Some(Kind::Codex) => {
+            let binary = assistant::find(Kind::Codex).unwrap_or_default();
+            app.state::<Codex>().start_over(&codex::Setup { binary, workdir: dir.join("codex"), mcp, about_user: String::new() });
+        }
+        _ => {
+            let binary = claude::find_binary().unwrap_or_default();
+            app.state::<Claude>().start_over(&claude::Setup { binary, workdir: dir.join("claude"), mcp, about_user: String::new() });
+        }
+    }
+    Ok(())
 }
 
 /// Handles a message with Claude. `focus` is the id of the page the message was sent from, and
@@ -626,8 +680,15 @@ pub async fn rename_page(graph: State<'_, Graph>, id: String, name: String) -> R
 }
 
 #[tauri::command]
-pub async fn delete_page(graph: State<'_, Graph>, id: String) -> Result<(), String> {
-    graph.delete(&id).map_err(text)
+pub async fn delete_page(app: AppHandle, id: String) -> Result<(), String> {
+    let graph = app.state::<Graph>();
+    let page = graph.get(&id).map_err(text)?;
+    graph.delete(&id).map_err(text)?;
+    // The page's file goes with it; a file left behind is read back as a new page.
+    if let Some(page) = page {
+        app.state::<Vault>().remove(&page)?;
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -711,7 +772,7 @@ pub struct AssistantStatus {
     chosen: Option<Kind>,
     /// Whether the chosen assistant is installed and signed in, so the app can run.
     ready: bool,
-    /// Claude Code, then Codex.
+    /// Claude Code, Codex, then Gemini CLI.
     assistants: Vec<assistant::Status>,
     /// Google Calendar connector status, known once Claude Code has answered a message.
     calendar_status: Option<String>,
@@ -721,10 +782,11 @@ pub struct AssistantStatus {
 /// Whether Claude Code and Codex are installed and signed in, and which one the app uses.
 #[tauri::command]
 pub async fn assistant_status(app: AppHandle) -> Result<AssistantStatus, String> {
-    let (claude, codex) = tauri::async_runtime::spawn_blocking(|| {
+    let (claude, codex, gemini) = tauri::async_runtime::spawn_blocking(|| {
         let codex = std::thread::spawn(|| assistant::status(Kind::Codex));
+        let gemini = std::thread::spawn(|| assistant::status(Kind::Gemini));
         let claude = assistant::status(Kind::Claude);
-        (claude, codex.join().expect("status check"))
+        (claude, codex.join().expect("status check"), gemini.join().expect("status check"))
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -732,15 +794,288 @@ pub async fn assistant_status(app: AppHandle) -> Result<AssistantStatus, String>
     let ready = match chosen {
         Some(Kind::Claude) => claude.ready(),
         Some(Kind::Codex) => codex.ready(),
+        Some(Kind::Gemini) => gemini.ready(),
         None => false,
     };
     Ok(AssistantStatus {
         chosen,
         ready,
-        assistants: vec![claude, codex],
+        assistants: vec![claude, codex, gemini],
         calendar_status: app.state::<Claude>().calendar_status(),
         calendar_help: CALENDAR_HELP,
     })
+}
+
+/// What Suk wants a decision on: new relationships and kinds of page, and possible duplicates.
+#[tauri::command]
+pub async fn tidy_items(graph: State<'_, Graph>) -> Result<TidyItems, String> {
+    tidy::items(&graph).map_err(text)
+}
+
+/// Keeps a new relationship or kind of page as it is, so it isn't offered for tidying again.
+#[tauri::command]
+pub async fn keep_type(graph: State<'_, Graph>, what: String, name: String) -> Result<(), String> {
+    check_what(&what)?;
+    graph.decide(&format!("{what}:{name}")).map_err(text)
+}
+
+/// Renames a relationship or kind of page everywhere, or merges it into an existing one by
+/// giving that one's name.
+#[tauri::command]
+pub async fn rename_type(app: AppHandle, what: String, name: String, new_name: String) -> Result<usize, String> {
+    check_what(&what)?;
+    let graph = app.state::<Graph>();
+    let new_name = new_name.trim();
+    let changed = match what.as_str() {
+        "relation" => graph.rename_relation(&name, new_name).map_err(text)?,
+        _ => {
+            let pages = graph.entities_of_kind(&name).map_err(text)?;
+            for page in &pages {
+                graph.change_kind(&page.id, new_name).map_err(text)?;
+            }
+            pages.len()
+        }
+    };
+    // Both names are settled now: the old one is gone, and the new one is what the user asked for.
+    graph.decide(&format!("{what}:{name}")).map_err(text)?;
+    graph.decide(&format!("{what}:{new_name}")).map_err(text)?;
+    let _ = app.emit("pages-changed", ());
+    Ok(changed)
+}
+
+/// Removes every relationship of a kind. The pages stay.
+#[tauri::command]
+pub async fn remove_relation_type(app: AppHandle, name: String) -> Result<usize, String> {
+    let removed = app.state::<Graph>().remove_relation(&name).map_err(text)?;
+    let _ = app.emit("pages-changed", ());
+    Ok(removed)
+}
+
+/// Makes one page out of two, keeping everything both had.
+#[tauri::command]
+pub async fn merge_pages(app: AppHandle, keep: String, remove: String) -> Result<Entity, String> {
+    let graph = app.state::<Graph>();
+    let gone = graph.get(&remove).map_err(text)?.ok_or("page not found")?;
+    let page = graph.merge(&keep, &remove).map_err(text)?;
+    app.state::<Vault>().remove(&gone)?;
+    app.state::<Notes>().add(format!(
+        "[App] The user merged the page \"{}\" into \"{}\" in the app; they are one page now.",
+        gone.name, page.name
+    ));
+    let _ = app.emit("pages-changed", ());
+    Ok(page)
+}
+
+/// Remembers that two pages are different things, so they aren't offered as duplicates again.
+#[tauri::command]
+pub async fn not_duplicates(graph: State<'_, Graph>, a: String, b: String) -> Result<(), String> {
+    graph.decide(&tidy::distinct_key(&a, &b)).map_err(text)
+}
+
+fn check_what(what: &str) -> Result<(), String> {
+    match what {
+        "relation" | "kind" => Ok(()),
+        other => Err(format!("{other} is neither a relationship nor a kind of page")),
+    }
+}
+
+/// Whether Suk can put things on Google Calendar, and as whom.
+#[derive(Serialize)]
+pub struct GoogleStatus {
+    /// False until the app has a Google client ID to sign in with.
+    client_set: bool,
+    connected: bool,
+    account: Option<String>,
+    /// Tasks with a date and a time that Suk hasn't asked about yet.
+    offers: Vec<calendar::Offer>,
+}
+
+/// The client Suk signs in with: its own, unless the user brought their own Google project.
+fn google_client(app: &AppHandle) -> Result<google::AppClient, String> {
+    let theirs = Settings::load(&data_dir(app)?).google_client.filter(google::AppClient::is_set);
+    Ok(theirs.unwrap_or_else(google::AppClient::built_in))
+}
+
+fn google_calendar(app: &AppHandle) -> Result<google::Calendar, String> {
+    Ok(google::Calendar::new(google_client(app)?, data_dir(app)?))
+}
+
+#[tauri::command]
+pub async fn google_status(app: AppHandle) -> Result<GoogleStatus, String> {
+    let dir = data_dir(&app)?;
+    let session = google::Session::load(&dir);
+    Ok(GoogleStatus {
+        client_set: google_client(&app)?.is_set(),
+        connected: session.is_some(),
+        account: session.map(|s| s.account).filter(|a| !a.is_empty()),
+        offers: calendar::offers(&app.state::<Graph>()).map_err(text)?,
+    })
+}
+
+/// Saves the OAuth client the app signs in with, from Google Cloud Console.
+#[tauri::command]
+pub async fn set_google_client(app: AppHandle, id: String, secret: String) -> Result<(), String> {
+    let client = google::AppClient { id: id.trim().to_string(), secret: secret.trim().to_string() };
+    if !client.is_set() {
+        return Err("That doesn't look like a client ID; it ends in .apps.googleusercontent.com.".into());
+    }
+    let dir = data_dir(&app)?;
+    let mut settings = Settings::load(&dir);
+    settings.google_client = Some(client);
+    settings.save(&dir)
+}
+
+/// Opens Google in the browser and waits for the user to allow access. Returns the account.
+#[tauri::command]
+pub async fn connect_google(app: AppHandle) -> Result<String, String> {
+    let calendar = google_calendar(&app)?;
+    let session = tauri::async_runtime::spawn_blocking(move || calendar.sign_in(|url| { let _ = open_target(url); }))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(session.account)
+}
+
+/// Forgets the Google account. Events already added stay where they are.
+#[tauri::command]
+pub async fn disconnect_google(app: AppHandle) -> Result<(), String> {
+    google::Session::forget(&data_dir(&app)?);
+    Ok(())
+}
+
+/// Puts a task on Google Calendar, after the user has said yes to the question.
+#[tauri::command]
+pub async fn add_task_to_calendar(app: AppHandle, id: String) -> Result<String, String> {
+    let graph = app.state::<Graph>();
+    let task = graph.get(&id).map_err(text)?.ok_or("that task is gone")?;
+    let due = task.info.get("due").filter(|d| d.contains('T')).ok_or("that task has no date and time")?;
+    let (start, end, when) = calendar::window(due, google::DEFAULT_MINUTES).ok_or("that date and time can't be read")?;
+    let block = google::Block {
+        page_id: task.id.clone(),
+        title: task.name.clone(),
+        start,
+        end,
+        notes: Some(task.notes.clone()).filter(|n| !n.trim().is_empty()),
+    };
+    let calendar = google_calendar(&app)?;
+    let (event_id, link) = tauri::async_runtime::spawn_blocking(move || calendar.add(&block))
+        .await
+        .map_err(|e| e.to_string())??;
+
+    let mut info = BTreeMap::from([(calendar::ON_CALENDAR.to_string(), Some(event_id))]);
+    if !link.is_empty() {
+        info.insert("calendar_link".to_string(), Some(link.clone()));
+    }
+    graph.update_info(&task.id, &info).map_err(text)?;
+    app.state::<Notes>().add(format!(
+        "[App] The user put the task \"{}\" on their Google Calendar for {when}.",
+        task.name
+    ));
+    let _ = app.emit("pages-changed", ());
+    Ok(link)
+}
+
+/// Remembers that this task doesn't belong on the calendar, so the question stops coming back.
+#[tauri::command]
+pub async fn skip_task_calendar(app: AppHandle, id: String) -> Result<(), String> {
+    let info = BTreeMap::from([(calendar::ON_CALENDAR.to_string(), Some(calendar::DECLINED.to_string()))]);
+    app.state::<Graph>().update_info(&id, &info).map_err(text)?;
+    let _ = app.emit("pages-changed", ());
+    Ok(())
+}
+
+/// Takes a task's event back off the calendar, and lets the question be asked again.
+#[tauri::command]
+pub async fn remove_task_from_calendar(app: AppHandle, id: String) -> Result<(), String> {
+    let graph = app.state::<Graph>();
+    let task = graph.get(&id).map_err(text)?.ok_or("that task is gone")?;
+    if let Some(event) = task.info.get(calendar::ON_CALENDAR).filter(|e| *e != calendar::DECLINED).cloned() {
+        let calendar = google_calendar(&app)?;
+        tauri::async_runtime::spawn_blocking(move || calendar.remove(&event)).await.map_err(|e| e.to_string())??;
+    }
+    let info = BTreeMap::from([
+        (calendar::ON_CALENDAR.to_string(), None),
+        ("calendar_link".to_string(), None),
+    ]);
+    graph.update_info(&task.id, &info).map_err(text)?;
+    let _ = app.emit("pages-changed", ());
+    Ok(())
+}
+
+/// Where the user's calendar app subscribes, and what is being published.
+#[derive(Serialize)]
+pub struct CalendarFeed {
+    /// For apps that subscribe: opening this hands the link to the calendar app.
+    webcal: String,
+    /// The same link as plain http, for pasting into an app that asks for a URL.
+    url: String,
+    /// False while publishing is turned off.
+    on: bool,
+    /// How many confirmed blocks are on it.
+    blocks: usize,
+    /// Where a snapshot is saved for importing into Google Calendar.
+    file: String,
+}
+
+#[tauri::command]
+pub async fn calendar_feed(app: AppHandle) -> Result<CalendarFeed, String> {
+    let feed = app.state::<Feed>();
+    let settings = Settings::load(&data_dir(&app)?);
+    Ok(CalendarFeed {
+        webcal: feed.webcal(),
+        url: feed.url(),
+        on: !settings.calendar_off,
+        blocks: calendar::slots(&app.state::<Graph>()).map_err(text)?.len(),
+        file: app.state::<Vault>().root().join(calendar::FILE).display().to_string(),
+    })
+}
+
+/// Turns publishing on or off. Off, the link answers nothing and the calendar app empties it.
+#[tauri::command]
+pub async fn set_calendar_feed(app: AppHandle, on: bool) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    let mut settings = Settings::load(&dir);
+    settings.calendar_off = !on;
+    settings.save(&dir)
+}
+
+/// Hands the link to the calendar app, which asks the user whether to subscribe.
+#[tauri::command]
+pub async fn subscribe_calendar(app: AppHandle) -> Result<(), String> {
+    open_target(&app.state::<Feed>().webcal())
+}
+
+/// Saves the blocks as a file, for calendars that import rather than subscribe (Google), and
+/// shows it in the file manager.
+#[tauri::command]
+pub async fn save_calendar_file(app: AppHandle) -> Result<String, String> {
+    let path = app.state::<Vault>().root().join(calendar::FILE);
+    let text = calendar::ics(&calendar::slots(&app.state::<Graph>()).map_err(text)?);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    reveal(&path)?;
+    Ok(path.display().to_string())
+}
+
+/// The starter templates, and the one in use.
+#[tauri::command]
+pub async fn templates(app: AppHandle) -> Result<(Vec<Template>, Option<String>), String> {
+    let chosen = Settings::load(&data_dir(&app)?).template;
+    Ok((templates::TEMPLATES.to_vec(), chosen))
+}
+
+/// Applies a starter template: adds its sidebar sections and tells the assistant what kind of
+/// work the user does. Sections already there are left alone.
+#[tauri::command]
+pub async fn apply_template(app: AppHandle, id: String) -> Result<Vec<String>, String> {
+    templates::find(&id).ok_or_else(|| format!("no template called {id}"))?;
+    let added = templates::apply(&app.state::<Graph>(), &id).map_err(text)?;
+    let dir = data_dir(&app)?;
+    let mut settings = Settings::load(&dir);
+    settings.template = Some(id);
+    settings.save(&dir)?;
+    Ok(added)
 }
 
 /// Chooses the assistant the app uses.
@@ -816,6 +1151,7 @@ pub fn watch_round(app: &AppHandle, only: Option<&str>) -> Result<watch::Round, 
     let ask = |prompt: &str, schema: &serde_json::Value| match (kind, &binary) {
         (Some(Kind::Claude), Some(binary)) => claude::ask_json(binary, &workdir, watch::JUDGE_SYSTEM, prompt, schema),
         (Some(Kind::Codex), Some(binary)) => codex::ask_json(binary, &workdir, watch::JUDGE_SYSTEM, prompt, schema),
+        (Some(Kind::Gemini), Some(binary)) => gemini::ask_json(binary, &workdir, watch::JUDGE_SYSTEM, prompt, schema),
         _ => Err("No assistant is set up".to_string()),
     };
     let ask: Option<&dyn Fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>> = binary.as_ref().map(|_| &ask as _);

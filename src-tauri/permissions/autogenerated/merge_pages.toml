@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-merge-pages"
+description = "Enables the merge_pages command without any pre-configured scope."
+commands.allow = ["merge_pages"]
+
+[[permission]]
+identifier = "deny-merge-pages"
+description = "Denies the merge_pages command without any pre-configured scope."
+commands.deny = ["merge_pages"]

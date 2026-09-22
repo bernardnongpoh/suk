@@ -1,4 +1,8 @@
 fn main() {
+    // Suk's Google client is compiled in, so a change of secret means a rebuild.
+    println!("cargo:rerun-if-env-changed=SUK_GOOGLE_CLIENT_ID");
+    println!("cargo:rerun-if-env-changed=SUK_GOOGLE_CLIENT_SECRET");
+
     // Declares the app commands so each must be granted explicitly in capabilities/default.json.
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
@@ -6,6 +10,7 @@ fn main() {
             "confirm_proposal",
             "dismiss_proposal",
             "chat_history",
+            "new_conversation",
             "list_tasks",
             "set_task_done",
             "assign_task",
@@ -31,6 +36,25 @@ fn main() {
             "open_url",
             "assistant_status",
             "choose_assistant",
+            "google_status",
+            "set_google_client",
+            "connect_google",
+            "disconnect_google",
+            "add_task_to_calendar",
+            "skip_task_calendar",
+            "remove_task_from_calendar",
+            "calendar_feed",
+            "set_calendar_feed",
+            "subscribe_calendar",
+            "save_calendar_file",
+            "tidy_items",
+            "keep_type",
+            "rename_type",
+            "remove_relation_type",
+            "merge_pages",
+            "not_duplicates",
+            "templates",
+            "apply_template",
             "install_assistant",
             "sign_in_assistant",
             "submit_sign_in_code",

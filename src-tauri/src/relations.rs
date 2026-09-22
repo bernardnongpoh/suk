@@ -90,7 +90,8 @@ pub fn sentence(from: &str, kind: &str, to: &str) -> String {
         "AFFILIATED_WITH" => "is at",
         "STUDIED_AT" => "studied at",
         "PART_OF" => "is part of",
-        other => other,
+        // A relationship the user's own work needed: REVIEWS reads as "reviews".
+        other => return format!("{from} {} {to}", other.to_lowercase().replace('_', " ")),
     };
     format!("{from} {verb} {to}")
 }
@@ -108,6 +109,7 @@ mod tests {
         assert!(!allowed("RELATED_TO", "Project", "Person"));
         assert!(!allowed("LINKS_TO", "Note", "Person"), "only the notes editor makes these");
         assert_eq!(sentence("Satya", "WORKS_ON", "Fuzzing"), "Satya works on Fuzzing");
+        assert_eq!(sentence("Kavya", "IS_EXAMINER_FOR", "Satya"), "Kavya is examiner for Satya");
         assert_eq!(sentence("Review draft", "WAITING_ON", "Kavya"), "Review draft is waiting on Kavya");
         assert!(allowed("AFFILIATED_WITH", "Person", "Organization"));
         assert!(!allowed("AFFILIATED_WITH", "Person", "Project"));

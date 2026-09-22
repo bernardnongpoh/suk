@@ -20,6 +20,8 @@ interface Props {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   /** The page this chat is about; Claude answers about it only. */
   focus?: Entity;
+  /** Load what was said before when the view opens. Page chats start clean instead. */
+  loadHistory?: boolean;
   /** A message to send as soon as the view opens, e.g. from Today's "Plan my day". */
   prompt?: string | null;
   onPromptSent?: () => void;
@@ -30,16 +32,19 @@ interface Props {
 
 let nextId = 0;
 
-function ChatView({ messages, setMessages, focus, prompt, onPromptSent, onChanged, onOpen }: Props) {
+function ChatView({ messages, setMessages, focus, loadHistory = false, prompt, onPromptSent, onChanged, onOpen }: Props) {
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(messages.length > 0);
+  const [loaded, setLoaded] = useState(messages.length > 0 || !loadHistory);
+  // Earlier messages are shown only when asked for, on pages.
+  const [earlier, setEarlier] = useState<ChatMessage[]>([]);
+  const [showEarlier, setShowEarlier] = useState(false);
   const [preset, setPreset] = useState<{ text: string } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   // Earlier conversations are kept, so they come back after a restart.
   useEffect(() => {
-    if (loaded) return;
+    if (loaded || !loadHistory) return;
     chatHistory(focus?.id ?? null).then(
       (records) => {
         setMessages((current) =>
@@ -54,6 +59,22 @@ function ChatView({ messages, setMessages, focus, prompt, onPromptSent, onChange
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: loaded ? "smooth" : "auto", block: "end" });
   }, [messages, pending, status]);
+
+  /** What was said before, fetched when "Show earlier messages" is clicked. */
+  async function loadEarlier() {
+    setShowEarlier(true);
+    if (earlier.length) return;
+    try {
+      const records = await chatHistory(focus?.id ?? null);
+      setEarlier(records.map((r) => ({ id: r.id, role: r.role, text: r.text })));
+    } catch {
+      setShowEarlier(false);
+    }
+  }
+
+  /** A form that has been filled in or skipped isn't waiting for anything any more. */
+  const formDone = (entityId: string) =>
+    setMessages((prev) => prev.map((m) => (m.details ? { ...m, details: m.details.filter((d) => d.entity.id !== entityId) } : m)));
 
   const add = (message: Omit<ChatMessage, "id">) =>
     setMessages((prev) => [...prev, { ...message, id: `new-${nextId++}` }]);
@@ -141,6 +162,24 @@ function ChatView({ messages, setMessages, focus, prompt, onPromptSent, onChange
       )}
       <div className="chat-log">
         <div className="chat-column">
+          {!loadHistory && !showEarlier && (
+            <button className="text-button show-earlier" onClick={loadEarlier}>
+              Show earlier messages
+            </button>
+          )}
+          {showEarlier &&
+            earlier.map((m) => (
+              <div key={m.id} className={`turn ${m.role} earlier`}>
+                {m.role === "agent" && (
+                  <div className="turn-mark" aria-hidden="true">
+                    <Icon name="sparkle" size={13} />
+                  </div>
+                )}
+                <div className="turn-body">
+                  <div className={`message ${m.role}`}>{m.text}</div>
+                </div>
+              </div>
+            ))}
           {messages.length === 0 && !pending ? (
             loaded && (
               <div className="chat-empty">
@@ -185,6 +224,7 @@ function ChatView({ messages, setMessages, focus, prompt, onPromptSent, onChange
                       request={d}
                       place="chat"
                       onChange={onChanged}
+                      onDone={() => formDone(d.entity.id)}
                       onOpen={focus ? undefined : onOpen}
                     />
                   ))}

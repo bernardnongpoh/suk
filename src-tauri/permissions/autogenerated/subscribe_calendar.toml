@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-subscribe-calendar"
+description = "Enables the subscribe_calendar command without any pre-configured scope."
+commands.allow = ["subscribe_calendar"]
+
+[[permission]]
+identifier = "deny-subscribe-calendar"
+description = "Denies the subscribe_calendar command without any pre-configured scope."
+commands.deny = ["subscribe_calendar"]

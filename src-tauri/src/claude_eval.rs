@@ -60,7 +60,7 @@ fn claude_conversation() {
     let setup = Setup {
         binary: claude::find_binary().expect("claude not installed"),
         workdir: workdir.clone(),
-        mcp: endpoint,
+        mcp: endpoint, about_user: String::new()
     };
     let claude = Claude::default();
     let failures = std::cell::RefCell::new(Vec::new());
@@ -85,7 +85,7 @@ fn claude_conversation() {
         "Amit Kumar joined this semester as my PhD student, email amit.k@example.edu. He'll work on LLM-assisted static analysis.",
         &|g, _| {
             let amit = g.find_by_name("Amit Kumar").unwrap().ok_or("Amit not saved")?;
-            if amit.kind != "Student" || amit.info.get("email").map(String::as_str) != Some("amit.k@example.edu") {
+            if !amit.tags.contains(&"student".to_string()) || amit.info.get("email").map(String::as_str) != Some("amit.k@example.edu") {
                 return Err(format!("Amit stored as {amit:?}"));
             }
             if g.entities_of_kind("Person").unwrap().iter().any(|p| p.name.contains('@')) {
@@ -110,11 +110,16 @@ fn claude_conversation() {
         "I have to review Amit's literature survey by Friday, it's high priority. The NBA accreditation report for the department is due on the 25th. And I need to prepare slides for lecture 7 of Software Analysis, which is tomorrow at 11.",
         &|g, _| {
             let survey = task(g, "survey")?;
-            if survey.info.get("due").map(String::as_str) != Some("2026-09-18") {
-                return Err(format!("survey due should be Friday 2026-09-18: {survey:?}"));
+            // "by Friday" is whichever Friday comes next, so check the weekday, not a fixed date.
+            let due = survey.info.get("due").cloned().unwrap_or_default();
+            let friday = chrono::NaiveDate::parse_from_str(&due[..due.len().min(10)], "%Y-%m-%d")
+                .is_ok_and(|d| chrono::Datelike::weekday(&d) == chrono::Weekday::Fri && (d - chrono::Local::now().date_naive()).num_days() <= 7);
+            if !friday {
+                return Err(format!("survey should be due on the coming Friday: {survey:?}"));
             }
             let nba = task(g, "nba")?;
-            if !nba.info.get("due").is_some_and(|d| d.starts_with("2026-09-25")) {
+            let twenty_fifth = chrono::Local::now().format("%Y-%m-25").to_string();
+            if !nba.info.get("due").is_some_and(|d| d.starts_with(&twenty_fifth)) {
                 return Err(format!("NBA due: {nba:?}"));
             }
             task(g, "slides")?;
@@ -184,7 +189,7 @@ fn claude_pages_and_focus() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-pages-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     // [App] notes the app sends before the next message.
     let notes = crate::assistant::Notes::default();
@@ -224,7 +229,7 @@ fn claude_pages_and_focus() {
     let step = "new student";
     let (reply, outcome) = say("I have a student Satya working on Fuzzing.", None);
     match graph.find_by_name("Satya").unwrap() {
-        Some(s) if s.kind == "Student" => {
+        Some(s) if s.tags.contains(&"student".to_string()) => {
             if !graph.links(&s.id).unwrap().iter().any(|l| l.kind == "WORKS_ON" && l.other.name.to_lowercase().contains("fuzz")) {
                 fail(step, "Satya not linked to a fuzzing project".into());
             }
@@ -357,7 +362,7 @@ fn claude_people() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-people-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let failures = std::cell::RefCell::new(Vec::new());
     let fail = |step: &str, e: String| {
@@ -461,7 +466,7 @@ fn claude_tasks() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-tasks-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     // [App] notes the app sends before the next message.
     let notes = crate::assistant::Notes::default();
@@ -562,7 +567,7 @@ fn claude_rename() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-rename-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let say = |message: &str| {
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -604,7 +609,7 @@ fn claude_organizations() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-orgs-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let failures = std::cell::RefCell::new(Vec::new());
     let fail = |step: &str, e: String| {
@@ -701,7 +706,7 @@ fn claude_assigned_tasks() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-assign-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let say = |message: &str| {
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -760,7 +765,7 @@ fn claude_following() {
     let workdir = std::env::temp_dir().join(format!("suk-claude-follow-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
     let binary = claude::find_binary().expect("claude not installed");
-    let setup = Setup { binary: binary.clone(), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: binary.clone(), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let say = |message: &str| {
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -858,7 +863,7 @@ fn claude_project_status() {
     let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
     let workdir = std::env::temp_dir().join(format!("suk-claude-status-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&workdir);
-    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
     let claude = Claude::default();
     let say = |message: &str| {
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -930,7 +935,7 @@ fn claude_corrections() {
         let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: Default::default(), activity: activity.clone() }).unwrap();
         let workdir = std::env::temp_dir().join(format!("suk-claude-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&workdir);
-        let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint };
+        let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
         (graph, activity, setup, Claude::default(), workdir)
     }
     fn say(graph: &Graph, activity: &tools::Activity, setup: &Setup, claude: &Claude, message: &str) -> String {
@@ -997,6 +1002,71 @@ fn claude_corrections() {
     }
     if reply.starts_with("error") {
         failures.push(reply);
+    }
+    let _ = std::fs::remove_dir_all(&workdir);
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A fixed ten-message conversation, reporting the tokens each message used, so changes to the
+/// instructions, tools or sessions can be compared. Also checks the basics were recorded.
+#[test]
+#[ignore]
+fn claude_token_budget() {
+    use crate::claude::Usage;
+    use crate::pages::{self, record_turn};
+
+    let graph = Arc::new(Graph::in_memory().unwrap());
+    let proposals = Arc::new(Proposals::default());
+    let activity = Arc::new(tools::Activity::default());
+    let endpoint = mcp::start(Shared { graph: graph.clone(), proposals: proposals.clone(), activity: activity.clone() }).unwrap();
+    let workdir = std::env::temp_dir().join(format!("suk-claude-budget-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&workdir);
+    let setup = Setup { binary: claude::find_binary().expect("claude not installed"), workdir: workdir.clone(), mcp: endpoint , about_user: String::new()};
+    let claude = Claude::default();
+    let script = [
+        "Satya Das joined as my PhD student this semester, email satya@example.edu. He'll work on compiler fuzzing with Kavya Rao from IISc.",
+        "I need to review Satya's literature survey by Friday, it's high priority.",
+        "Kavya is sending the grant budget next week; I'm waiting on her.",
+        "Note for the compiler fuzzing project: we decided to target LLVM first.",
+        "Meera Iyer is my MTech student; she's helping Satya with the fuzzing infrastructure.",
+        "What does Satya have going on?",
+        "The NBA accreditation report is due on the 30th.",
+        "Which of my tasks are due this week?",
+        "I finished reviewing Satya's survey.",
+        "Who is working on compiler fuzzing?",
+    ];
+    let mut total = Usage::default();
+    println!("\n{:<4} {:>5} {:>9} {:>9} {:>7} {:>7}  message", "#", "calls", "input", "cached", "output", "context");
+    for (i, message) in script.iter().enumerate() {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let started = crate::graph::tests_now();
+        activity.begin(vec![]);
+        let mut content = pages::claude_message(&graph, None, &[], message).unwrap();
+        if claude.begins_fresh(&setup) {
+            content = format!("{}{content}", pages::recent_brief(&graph).unwrap());
+        }
+        let turn = claude.send(&setup, &content, &mut |_| {}).expect("turn");
+        let (touched, suggested) = activity.take();
+        record_turn(&graph, started, None, &[], &touched, &suggested, message, &turn.text).unwrap();
+        let u = turn.usage;
+        total += u;
+        println!("{:<4} {:>5} {:>9} {:>9} {:>7} {:>7}  {}", i + 1, u.calls, u.input, u.cached, u.output, u.last_context, &message[..message.len().min(50)]);
+        println!("       reply: {}", turn.text.replace('\n', " ").chars().take(160).collect::<String>());
+    }
+    println!("{:<4} {:>5} {:>9} {:>9} {:>7}", "all", total.calls, total.input, total.cached, total.output);
+
+    let mut failures = Vec::new();
+    let satya = graph.find_by_name("Satya Das").unwrap().or_else(|| graph.find_by_name("Satya").unwrap());
+    match &satya {
+        Some(s) if s.tags.contains(&"student".to_string()) => {}
+        other => failures.push(format!("Satya not a student: {other:?}")),
+    }
+    let tasks = graph.tasks(&crate::graph::TaskQuery::default()).unwrap();
+    if !tasks.iter().any(|t| t.name.to_lowercase().contains("survey") && t.info.get("status").map(String::as_str) == Some("done")) {
+        failures.push("survey review not done".into());
+    }
+    if !tasks.iter().any(|t| t.name.to_lowercase().contains("nba")) {
+        failures.push("NBA task missing".into());
     }
     let _ = std::fs::remove_dir_all(&workdir);
     assert!(failures.is_empty(), "{failures:#?}");

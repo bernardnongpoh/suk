@@ -18,6 +18,8 @@ interface Props {
   onCount?: (open: number, overdue: number) => void;
   /** Shown above the list when it isn't empty. */
   header?: React.ReactNode;
+  /** Narrows the list further, for the tabs on Today. */
+  filter?: (item: TaskItem) => boolean;
 }
 
 const addDays = (days: number) => {
@@ -41,7 +43,7 @@ function group(item: TaskItem) {
  * Open tasks, in the order the database returns them (soonest first). Ticking one crosses it
  * out; it leaves the list the next time the list loads.
  */
-function TaskList({ about, grouped, assigned, version, onOpen, empty, onCount, header }: Props) {
+function TaskList({ about, grouped, assigned, version, onOpen, empty, onCount, header, filter }: Props) {
   const [items, setItems] = useState<TaskItem[] | null>(null);
   const [done, setDone] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -49,8 +51,9 @@ function TaskList({ about, grouped, assigned, version, onOpen, empty, onCount, h
   useEffect(() => {
     let cancelled = false;
     listTasks("open", about, assigned).then(
-      (result) => {
+      (all) => {
         if (cancelled) return;
+        const result = filter ? all.filter(filter) : all;
         setItems(result);
         setDone({});
         const today = todayKey();
@@ -61,7 +64,7 @@ function TaskList({ about, grouped, assigned, version, onOpen, empty, onCount, h
     return () => {
       cancelled = true;
     };
-  }, [about, assigned, version]);
+  }, [about, assigned, version, filter]);
 
   async function toggle(task: Entity) {
     const next = !done[task.id];

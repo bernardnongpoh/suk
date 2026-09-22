@@ -4,8 +4,10 @@ import type { DetailsRequest, Proposal, SectionIdea } from "./api";
 export type Route =
   | { view: "today" }
   | { view: "chat" }
+  | { view: "calendar" }
   | { view: "notes" }
   | { view: "updates" }
+  | { view: "tidy" }
   | { view: "settings" }
   | { view: "section"; tag: string; title: string }
   | { view: "page"; id: string };

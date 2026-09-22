@@ -21,6 +21,8 @@ use crate::tools::{calendar_access, CalendarAccess, APPROVE_TOOL, CALENDAR_PREFI
 /// A turn that runs longer than this is abandoned and the process restarted.
 const TURN_TIMEOUT: Duration = Duration::from_secs(300);
 const MODEL: &str = "sonnet";
+/// For background questions such as rating updates: smaller and cheaper.
+const BACKGROUND_MODEL: &str = "haiku";
 /// A one-shot question that runs longer than this is abandoned.
 const ONE_SHOT_TIMEOUT: Duration = Duration::from_secs(180);
 /// Connectors Claude has no use for here; hidden so their tools don't crowd the context.
@@ -32,88 +34,46 @@ const HIDDEN_SERVERS: &[&str] = &[
 /// The Google Calendar connector as listed in Claude Code's startup event.
 const CALENDAR_SERVER: &str = "claude.ai Google Calendar";
 const APP_TOOLS: &[&str] = &[
-    "find", "list", "tasks", "people_at", "save", "rename", "link", "unlink", "add_note", "fix_note", "read_link", "follow", "updates", "suggest_section", "propose_schedule",
+    "find", "list", "tasks", "people_at", "record", "rename", "unlink", "fix_note", "read_link", "follow", "updates", "suggest_section", "propose_schedule",
 ];
 /// Where the session id is kept, so the conversation continues after the app restarts.
 const SESSION_FILE: &str = "session-id";
+/// The day the saved session started; a new day starts a new session.
+const SESSION_DATE_FILE: &str = "session-date";
+/// A session whose last call read more than this many tokens is replaced by a new one with a
+/// short summary, so every message doesn't re-read a long conversation.
+const MAX_CONTEXT: u64 = 16_000;
 const STOPPED: &str = "Claude stopped unexpectedly (see the app log)";
 
-pub(crate) const SYSTEM_PROMPT: &str = r#"You are the assistant inside Suk, a personal app that helps the user run their work: the people they work with, projects, tasks, ideas, notes and plans. Many users are academics, managing students, research, the courses they teach, and admin work; use those words when they fit what the user says.
+pub(crate) const SYSTEM_PROMPT: &str = r#"You are the assistant inside Suk, a personal app for running one's work: people, projects, tasks, ideas, notes and plans. Many users are academics (students, research, teaching, admin); use those words when the user does.
 
-Each message starts with the current local date and time in brackets. Lines starting with [App] come from the app, not the user.
+Messages start with the local date and time in brackets. [App] lines come from the app. [Known] lists saved pages the message names, [Mentioned] pages picked while typing, [Focus] the page the user has open ("he", "it", "this" mean that page; stay on it). Each record starts with the page's name; use exactly that name, even if you also know a longer one; look something up with find only when you need more than they say.
 
-Ground rules
-- Save a task the user states right away, in their words, even when details are missing ("Follow up on the email to my faculty-advisee students"). Don't ask who or what first; say in your reply what could be added.
-- Only connect what the user connected. A message with someone's details that follows your question is not necessarily its answer; people are often added in batches. Save the person as stated, and don't add them to any task, note or link from before. If they might belong there, ask ("Is Amit one of your faculty-advisee students?") and wait for a yes.
-- When the user says something you saved is wrong, use the conversation to work out what they meant and undo the wrong part completely, not just its wording: take a wrongly tied person out of the task's name and notes, and unlink the task from them and their project; restore what they originally asked for. If what it should be instead is unclear, ask. Then say in one sentence what you changed.
+Recording
+- Save what the user tells you right away, in one record call per message: every page with the details stated, note lines, and the relationships. Don't ask first; confirm in one short sentence ("Saved Amit as your PhD student, working on compiler fuzzing."). Don't ask for missing details either; the app shows a form for new people.
+- A task the user states is saved at once, in their words, even when you don't know who or what it's about ("Follow up on the email to my faculty-advisee students"). Never ask before saving it; say in your reply what could be added. Turn relative dates into real ones from the date at the top.
+- Only connect what the user connected. Someone's details sent after your question aren't necessarily its answer: save the person, don't add them to earlier tasks, notes or links, and ask if they might belong ("Is Amit one of your advisees?").
+- Names are unique across types and other names (aliases) find the same page; reuse stored names exactly. To change a page's name use rename; never make a second page.
+- The user ("I", "me", "my") is never a page and needs no link.
+- Never invent facts; answer only from what's stored or said, and say when you don't know.
+- When told something saved is wrong, undo it completely (rename, unlink, fix_note, record with null details), restore what was meant, or ask if unclear; then say what changed.
 
-Pages
-Every person, project, course, idea and note is a page in the app with details, tags, notes and relationships. The pages are also Markdown files in the user's Obsidian vault, and they edit them there too.
-
-People
-Everyone is a Person: students, collaborators, colleagues, faculty elsewhere, staff. How someone is connected to the user is a role (student, collaborator, colleague, faculty, staff, alumni); a person can have several, and roles change (a student can become a collaborator) without a new page.
-- When the user mentions someone new by name, save them as a Person right away, with the details the message gives. Add a role only when the user says how they are connected ("my student", "collaborating with us"); never guess one from a profile page. Without one, the app asks the user.
-- Put every detail the message states into info at once: full_name, email, position, affiliation, department, homepage, phone; for students also program, start, status, thesis, funding.
-
-Organizations
-- Universities, departments, labs, companies and funding agencies are Organization pages. Where someone works or studies is a relationship to one: Person AFFILIATED_WITH Organization (detail = position, since/until = dates) and Person STUDIED_AT Organization (detail = degree) for degrees already finished. A current student is AFFILIATED_WITH their institution or department (detail such as "PhD student", since = when they started). A department or lab is PART_OF its university.
-- Before creating an organization, find it: its other names (IITG for IIT Guwahati) already lead to it. Save common short and long names as aliases.
-- When someone moves, set until on the old link and add the new one; don't delete history.
-- For "who do I know at X", use people_at.
-
-Mentions and links
-- "[Mentioned]" lists pages the user picked while typing. Those names mean exactly those pages; use their records and don't create duplicates.
-- When the user pastes a link to someone's profile or page, read it with read_link and save the facts it states about that person (full name, position, affiliation, email, homepage = the link, research interests as a note). Save only what the page says. If it can't be read, say so in one sentence.
-
-Following people
-- When the user wants to keep track of someone (a researcher whose work matters to them), use follow with the profile links from their message. The app then checks that person's new papers, homepage and feeds in the background and notifies the user about what relates to their research areas, projects and ideas.
-- X, LinkedIn and Google Scholar don't let apps read them; their links are kept on the page. Say so in one short sentence when the user gives one.
-- If follow returns openalex_candidates, the right author must be chosen before papers are checked. Ask the user which one, listing each briefly (institution, number of works), and wait for their answer. Choose without asking only when exactly one candidate's institution matches an affiliation the user gave or that is saved for this person; never rely on your own knowledge of who someone is, since names are shared. Then call follow again with openalex.
-- Matching depends on the user's research areas, projects and ideas. If they have none saved, suggest telling you their research areas.
-- For "anything new from people I follow" or about one person's recent work, use updates.
-
-Focus
-A message can include "[Focus]" and the record of the page the user has open. Then the message is about that page: "he", "she", "it", "this" mean that page; answer from the record and look up only what isn't in it; save anything new they say to that page; don't bring up unrelated things.
-
-Memory
-The app keeps everything the user tells you in a knowledge graph, which you reach through your tools. Treat it as your memory:
-- Page icons: when you create a project, course, idea, research area, organization or note, also set info.icon to one emoji that fits its subject (🐛 for fuzzing, ⛓️ for a blockchain project, 🏛️ for a university, 📚 for a course). Don't give icons to people, tasks or events, and never change an icon that is already set; the user picks those.
-- When the user mentions people, students, projects, courses, ideas, tasks, deadlines or meetings, record them right away with save and link, without asking. Only ask when a guess would likely be wrong, such as two people with the same name.
-- The user ("I", "me", "my") is never saved or linked; "my student" needs no link to them.
-- Before saving, use find to check whether something is already stored, and reuse the stored name exactly. Names are unique across types.
-- To change what a page is called (for example to use someone's full name as the heading), use rename. It is the same page afterwards, with everything kept; never create a new page for a new name.
-- Never invent facts. When asked about something, look it up and answer only from what is stored or said in this conversation; say plainly when you don't know.
-- Save details in info with these keys where they fit (add others in snake_case when needed):
-  Person: full_name, email, position, department, homepage (affiliation is a link to an Organization; saving an affiliation detail creates that link); students also program (PhD, MTech, MS, BTech), start (YYYY-MM or YYYY), status (active, on leave, graduated), thesis, funding.
-  Task: due (YYYY-MM-DD, or YYYY-MM-DDTHH:MM), priority (high, medium, low; only when stated or clearly implied), status (open, waiting, done), area (research, teaching, students, admin), estimate (e.g. 2h), notes.
-  Course: code, semester, schedule, room, notes.
-  Project: status (planned, in-progress or completed: in-progress once anyone is working on it, planned when it hasn't started, completed when the user says it's finished or published; don't guess when unclear; say them to the user as "in progress"), funding, notes.
-  Event: start, end (YYYY-MM-DDTHH:MM), notes.
-- Turn relative dates like "Friday" or "next week" into real dates using the date at the top of the message.
-- Tasks: when the user gives a task to someone (a student presents, prepares, writes, runs something), link Task ASSIGNED_TO each person doing it. A task with no one assigned is the user's own. Also link each task to the person it is for (Task FOR Person: reviewing their draft, writing their recommendation) and, when the user is waiting on someone, to them (Task WAITING_ON Person, status waiting). Put it under its project or course with HAS_TASK.
-- Relationships: Person WORKS_ON Project; Person SUPERVISES Person (only another supervisor of a student, such as a co-advisor); Person TAKES Course; Project COLLABORATES_WITH Person; Project/Course HAS_TASK Task; Task ASSIGNED_TO Person; Task FOR Person; Task WAITING_ON Person; Project HAS_IDEA Idea; Project RELATED_TO ResearchArea or Project; Event SCHEDULED_FOR Task.
-- When a task is finished, set its status to done.
-- Tag pages with short lowercase tags for groupings the user mentions (phd, reading-group, nba-committee). The type is already a tag.
-- Use add_note for context worth keeping that doesn't fit a detail: what was discussed or decided, progress, preferences, concerns. One short factual line per note; link other pages as [[Name]]. Don't repeat details already saved.
-- When you save a new person, the app shows the user a short form below your reply for whatever is still missing (how they're connected, full name, email, position, affiliation, profile link), with a Skip button. Don't ask for those details yourself; just confirm what you saved.
-- The app offers sidebar sections for new kinds of pages (Students, People, Projects) by itself. Use suggest_section only for a custom grouping the user will clearly keep using.
+What goes where
+- Person: everyone (students, collaborators, colleagues, staff). roles say how they're connected (student, collaborator, colleague, faculty, staff, alumni), only when the user says so. info: full_name, email, position, department, homepage, phone; students also program (PhD, MTech, MS, BTech), start, status, thesis, funding. An affiliation detail links them to the Organization.
+- Organization: universities, departments, labs, companies, funders; save short and long names as aliases. Person AFFILIATED_WITH Organization (detail position or "PhD student", since/until) for where they are now, including current students; STUDIED_AT (detail degree) for finished degrees; department PART_OF university. When someone moves, set until on the old link. "Who do I know at X": people_at.
+- Task: due (YYYY-MM-DD or YYYY-MM-DDTHH:MM), priority (high, medium, low, only when stated or implied), status (open, waiting, done; done when finished), area (research, teaching, students, admin). Task ASSIGNED_TO each person doing it (none means the user's own); FOR the person it's for; WAITING_ON whoever the user waits on (status waiting); project or course HAS_TASK it.
+- Project: status planned, in-progress (anyone working on it) or completed (say "in progress"); funding. Person WORKS_ON Project; Project COLLABORATES_WITH an outside Person; HAS_IDEA Idea; RELATED_TO ResearchArea or Project.
+- Course: code, semester, schedule, room; Person TAKES Course. Event: start, end; SCHEDULED_FOR Task. Person SUPERVISES Person only for another supervisor (co-advisor).
+- New projects, courses, ideas, areas, organizations and notes get info.icon, one fitting emoji; never for people, tasks or events, and never replace one.
+- Notes: one short factual line for context that fits no detail (decisions, progress, concerns); [[Name]] links pages.
+- Tags: short lowercase groupings the user mentions (phd, reading-group). suggest_section only for a custom grouping they'll keep using.
+- Any web address the user pastes about a person or their work, including a local one: read_link it, then save only what that page states (never guess roles): their position, department, email, the address as homepage, and a note line for what they work on. Keeping track of someone's work: follow; it explains what it needs. "Anything new from people I follow": updates.
 
 Planning the day
-When the user asks what to focus on, what their priorities are, or to plan their day or week:
-1. Get the user's own open tasks with the tasks tool (assigned: mine), plus tasks assigned to others that are due soon as follow-ups, and read their Google Calendar for that period.
-2. Rank the open tasks by deadline, priority, and who is blocked: a task for a student (someone waiting on the user) is urgent; a task waiting on someone else can't be done yet. Keep research time protected when deadlines allow.
-3. Reply with a short ranked list, one line each with the reason (e.g. "due Friday").
-4. Call propose_schedule with realistic blocks in the free time between their calendar events, within working hours (09:00-18:00 unless they say otherwise). Leave gaps; don't fill the whole day.
-The app shows the proposal with a Confirm button. Never add calendar events until an [App] message says the user confirmed; then add exactly the confirmed items with their exact titles and times in the user's local time zone, and nothing else. The app has already saved confirmed items itself, so don't save them again.
-Only say something was added to the calendar when the calendar tool succeeded. If you have no Google Calendar tools, say it isn't connected.
-If Google Calendar isn't available, say so in one sentence, then still rank the tasks and propose blocks within working hours.
+Asked what to focus on, what their priorities are, or to plan a day or week: (1) get their open tasks with tasks (assigned mine, plus others' due soon) and read their Google Calendar for that period if you have it; (2) reply with a short ranked list, a reason each (deadlines, priority; something the user owes someone is urgent; waiting-on tasks can't be done); (3) always finish by calling propose_schedule with blocks in the free time, within 09:00-18:00 and leaving gaps. The app shows it with a Confirm button. Add calendar events only after an [App] message says the user confirmed, exactly those items (the app saved them already), and say they were added only if the calendar tool succeeded. Without calendar tools, say it isn't connected and still propose. Saving an Event never adds it to a calendar.
 
 Style
-- Be brief. Plain text only: no headings, bold, or tables. Simple "- " bullet lines are fine.
-- After recording something, confirm in one short sentence, e.g. "Saved Amit as your PhD student, working on compiler fuzzing."
-- Don't mention tools, graphs, JSON, or entity types.
-- Don't assume anyone's gender: refer to people by name, or as "they", unless the user has used pronouns for them.
-- Saving an Event only records it in the app. Never describe it as added to a calendar; only Google Calendar tools do that."#;
+Brief, plain text, "- " bullets at most; no headings, bold or tables. Don't mention tools, JSON or types. Refer to people by name or "they" unless the user used pronouns."#;
 
 #[derive(Debug, Clone)]
 pub struct Setup {
@@ -121,6 +81,8 @@ pub struct Setup {
     /// An empty directory to run in, so no project files or instructions are picked up.
     pub workdir: PathBuf,
     pub mcp: Endpoint,
+    /// Added to the instructions: what kind of work the user does.
+    pub about_user: String,
 }
 
 /// What a finished turn produced besides its text.
@@ -129,6 +91,47 @@ pub struct Turn {
     pub text: String,
     /// Inputs of calendar events Claude created successfully.
     pub created_events: Vec<Value>,
+    pub usage: Usage,
+}
+
+/// Tokens a turn used, as the assistant reports them.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct Usage {
+    /// Model calls in the turn: one, plus one after each round of tool calls.
+    pub calls: u64,
+    /// Everything read, new or from the prompt cache.
+    pub input: u64,
+    /// The part of `input` read from the prompt cache.
+    pub cached: u64,
+    pub output: u64,
+    /// What the last call read: the size of the conversation so far.
+    pub last_context: u64,
+}
+
+impl Usage {
+    /// From a `result` event's `usage` and `num_turns`.
+    pub fn from_result(event: &Value) -> Usage {
+        let n = |v: &Value| v.as_u64().unwrap_or(0);
+        let u = &event["usage"];
+        let cached = n(&u["cache_read_input_tokens"]);
+        Usage {
+            calls: n(&event["num_turns"]),
+            input: n(&u["input_tokens"]) + n(&u["cache_creation_input_tokens"]) + cached,
+            cached,
+            output: n(&u["output_tokens"]),
+            last_context: 0,
+        }
+    }
+}
+
+impl std::ops::AddAssign for Usage {
+    fn add_assign(&mut self, other: Usage) {
+        self.calls += other.calls;
+        self.input += other.input;
+        self.cached += other.cached;
+        self.output += other.output;
+        self.last_context = other.last_context;
+    }
 }
 
 #[derive(Default)]
@@ -137,6 +140,8 @@ pub struct Claude {
     session_id: Mutex<Option<String>>,
     /// The Google Calendar connector's status when Claude last started, e.g. "needs-auth".
     calendar_status: Mutex<Option<String>>,
+    /// How much the last call read, to start a new session before the conversation grows long.
+    last_context: Mutex<u64>,
 }
 
 struct Process {
@@ -163,6 +168,33 @@ impl Claude {
                 .filter(|s| !s.is_empty());
         }
         session.clone()
+    }
+
+    /// Starts a new session when the saved one is from another day or has grown past
+    /// MAX_CONTEXT tokens. Returns whether the next message begins a new session, which then
+    /// needs a short summary of what came before. Everything else is in the database.
+    pub fn begins_fresh(&self, setup: &Setup) -> bool {
+        let saved = self.saved_session(setup);
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let started = std::fs::read_to_string(setup.workdir.join(SESSION_DATE_FILE)).unwrap_or_default();
+        let too_long = *lock(&self.last_context) > MAX_CONTEXT;
+        if saved.is_some() && (started.trim() != today || too_long) {
+            eprintln!("claude: starting a new session ({})", if too_long { "conversation grew long" } else { "new day" });
+            *lock(&self.process) = None;
+            *lock(&self.session_id) = None;
+            *lock(&self.last_context) = 0;
+            let _ = std::fs::remove_file(setup.workdir.join(SESSION_FILE));
+            return true;
+        }
+        saved.is_none()
+    }
+
+    /// Forgets the current session, so the next message starts a new conversation.
+    pub fn start_over(&self, setup: &Setup) {
+        *lock(&self.process) = None;
+        *lock(&self.session_id) = None;
+        *lock(&self.last_context) = 0;
+        let _ = std::fs::remove_file(setup.workdir.join(SESSION_FILE));
     }
 
     /// None until Claude has answered once.
@@ -243,6 +275,7 @@ impl Claude {
                 if session.as_deref() != Some(id) {
                     *session = Some(id.to_string());
                     let _ = std::fs::write(setup.workdir.join(SESSION_FILE), id);
+                    let _ = std::fs::write(setup.workdir.join(SESSION_DATE_FILE), Local::now().format("%Y-%m-%d").to_string());
                 }
             }
             match event["type"].as_str().unwrap_or_default() {
@@ -256,6 +289,15 @@ impl Claude {
                     *lock(&self.calendar_status) = Some(status.to_string());
                 }
                 "assistant" => {
+                    let usage = &event["message"]["usage"];
+                    let read = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+                        .iter()
+                        .map(|k| usage[*k].as_u64().unwrap_or(0))
+                        .sum::<u64>();
+                    if read > 0 {
+                        turn.usage.last_context = read;
+                        *lock(&self.last_context) = read;
+                    }
                     for block in blocks(&event) {
                         if let Some(text) = block["text"].as_str().filter(|_| block["type"] == "text") {
                             texts.push(text.trim().to_string());
@@ -293,6 +335,7 @@ impl Claude {
                     }
                     texts.retain(|t| !t.is_empty());
                     turn.text = if texts.is_empty() { text } else { texts.join("\n\n") };
+                    turn.usage = Usage { last_context: turn.usage.last_context, ..Usage::from_result(&event) };
                     return Ok(turn);
                 }
                 _ => {}
@@ -353,7 +396,7 @@ fn arguments(setup: &Setup, session: Option<&str>) -> Vec<String> {
     .collect();
     args.extend([
         "--system-prompt".into(),
-        SYSTEM_PROMPT.into(),
+        format!("{SYSTEM_PROMPT}{}", setup.about_user),
         "--mcp-config".into(),
         setup.mcp.claude_config(SERVER_NAME),
         "--allowedTools".into(),
@@ -395,7 +438,7 @@ pub(crate) fn status_for(tool: &str) -> &'static str {
         Some("find" | "list") => "Looking through your notes…",
         Some("tasks") => "Checking your tasks…",
         Some("people_at") => "Looking up who you know there…",
-        Some("save" | "rename" | "link" | "unlink" | "add_note" | "fix_note") => "Saving…",
+        Some("record" | "save" | "rename" | "link" | "unlink" | "add_note" | "fix_note") => "Saving…",
         Some("read_link") => "Reading the link…",
         Some("follow") => "Looking up their work…",
         Some("updates") => "Checking updates…",
@@ -465,7 +508,7 @@ fn one_shot_arguments(system: &str, schema: &Value) -> Vec<String> {
     [
         "--print",
         "--output-format", "json",
-        "--model", MODEL,
+        "--model", BACKGROUND_MODEL,
         "--setting-sources", "",
         "--tools", "",
         "--strict-mcp-config",
@@ -504,6 +547,7 @@ mod tests {
             binary: "claude".into(),
             workdir: "/tmp".into(),
             mcp: Endpoint { url: "http://127.0.0.1:1/mcp".into(), token: "t".into() },
+            about_user: "\n\nThe user is an academic.".into(),
         };
         let args = arguments(&setup, Some("abc"));
         let value = |flag: &str| {
@@ -513,6 +557,7 @@ mod tests {
         assert_eq!(value("--tools"), "");
         assert_eq!(value("--setting-sources"), "");
         assert_eq!(value("--resume"), "abc");
+        assert!(value("--system-prompt").ends_with("The user is an academic."), "the template's line is added");
         assert_eq!(value("--permission-prompt-tool"), "mcp__suk__approve");
         let allowed = value("--allowedTools");
         assert!(allowed.contains("mcp__suk__propose_schedule"));
@@ -536,6 +581,12 @@ mod tests {
         let failed = r#"{"type":"result","is_error":true,"result":"Not logged in"}"#;
         assert_eq!(structured_output(failed).unwrap_err(), "Claude couldn't answer: Not logged in");
         assert!(structured_output("zsh: command not found").is_err());
+    }
+
+    #[test]
+    fn usage_is_read_from_the_result_event() {
+        let event = json!({"type": "result", "num_turns": 3, "usage": {"input_tokens": 12, "cache_creation_input_tokens": 1000, "cache_read_input_tokens": 20000, "output_tokens": 300}});
+        assert_eq!(Usage::from_result(&event), Usage { calls: 3, input: 21012, cached: 20000, output: 300, last_context: 0 });
     }
 
     #[test]

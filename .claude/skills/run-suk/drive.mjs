@@ -121,6 +121,18 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
     put("Person", "Andreas Zeller", { tags: ["collaborator", "following"], info: { affiliation: "CISPA", homepage: "https://andreas-zeller.info/", twitter: "https://x.com/AndreasZeller", linkedin: "https://www.linkedin.com/in/andreaszeller/", openalex: "A5051672229", github: "https://github.com/andreas-zeller" } });
     put("Person", "Lin Tan", { tags: ["faculty"], info: { homepage: "https://www.cs.purdue.edu/homes/lintan/" } });
     put("ResearchArea", "Compiler Testing");
+    // Tidy up: a relationship and a kind of page Suk started using on its own, and a name that
+    // may be a page there already.
+    put("Grant", "SERB Core Research Grant", { info: { funder: "SERB", amount: "45 lakh" } });
+    put("Person", "Satya Prakash", { tags: ["student"] });
+    db.links.push({ from: "person:kavya rao", kind: "REVIEWS", to: "project:fuzzing" });
+    db.links.push({ from: "person:meera iyer", kind: "REVIEWS", to: "project:fuzzing" });
+    db.decisions = [];
+    db.calendarOn = true;
+    db.google = { clientSet: true, connected: false };
+    // A task with a day and a time, which Suk should ask about.
+    put("Task", "Call the NBA coordinator", { info: { due: "2026-09-18T11:00", status: "open", area: "admin" } });
+    const feedKey = "8bb344444de74e66a0cc3566a683ad1f";
     const act = (id, extra) => ({ id, person: "person:andreas zeller", source: "openalex", kind: "paper", title: "", url: "https://doi.org/10.0/" + id, summary: "", published: addDays(-1), found_at: Date.now(), baseline: false, relevance: "", reason: "", related: [], seen: false, notified: true, ...extra });
     db.activities = [
       act("a1", { title: "Finding Miscompilations in Solidity Compilers with Grammar-Based Fuzzing", summary: "ICSE 2027 — We generate Solidity programs from a grammar and compare solc optimization levels, finding 14 miscompilations in the Solidity compiler.", relevance: "high", reason: "Grammar-based fuzzing of solc, the same approach as your project", related: ["Fuzzing", "Compiler Testing"] }),
@@ -164,6 +176,52 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
       Project: [f("funding", "Funding"), f("start", "Started"), f("end", "Ends"), f("homepage", "Link", "url")],
       Organization: [f("type", "Type"), f("city", "City"), f("country", "Country"), f("homepage", "Website", "url")],
     })[e.kind] ?? [];
+    // Tidy up, worked out the same way as tidy.rs: types the app doesn't ship with, and names
+    // where one is part of the other or its initials.
+    const KNOWN_KINDS = ["Person", "Project", "Course", "Idea", "Task", "Document", "Event", "ResearchArea", "Note", "Organization"];
+    const KNOWN_RELATIONS = ["WORKS_ON", "SUPERVISES", "HAS_IDEA", "HAS_TASK", "RELATED_TO", "COLLABORATES_WITH", "AUTHORED", "MENTIONED_IN", "ATTACHED_TO", "TAKES", "SCHEDULED_FOR", "LINKS_TO", "FOR", "WAITING_ON", "ASSIGNED_TO", "AFFILIATED_WITH", "STUDIED_AT", "PART_OF"];
+    const looksLike = (a, b) => {
+      const words = (n) => n.toLowerCase().split(/\\s+/).map((w) => w.replace(/,$/, "")).filter(Boolean);
+      const [first, second] = [words(a), words(b)];
+      if (!first.length || !second.length || first.join(" ") === second.join(" ")) return null;
+      const [short, long] = first.length <= second.length ? [first, second] : [second, first];
+      const shown = first.length <= second.length ? [a, b] : [b, a];
+      if (short.every((w) => long.includes(w))) {
+        const longer = a.length >= b.length ? a.toLowerCase() : b.toLowerCase();
+        if (longer.endsWith(", " + short.join(" "))) return null;
+        return '"' + shown[0] + '" is part of "' + shown[1] + '"';
+      }
+      if (short.length === long.length && short.at(-1) === long.at(-1) &&
+          short.every((w, i) => w === long[i] || (w.replace(/\\.$/, "").length === 1 && w[0] === long[i][0])))
+        return '"' + shown[0] + '" may be short for "' + shown[1] + '"';
+      return null;
+    };
+    const tidyItems = () => {
+      const kept = (key) => !db.decisions.includes(key);
+      const counts = (list, key) => list.reduce((m, x) => m.set(key(x), (m.get(key(x)) ?? 0) + 1), new Map());
+      const relations = [...counts(db.links, (l) => l.kind)]
+        .filter(([kind]) => !KNOWN_RELATIONS.includes(kind) && kept("relation:" + kind))
+        .map(([kind, count]) => ({ name: kind, label: kind.toLowerCase().replace(/_/g, " "), count,
+          examples: db.links.filter((l) => l.kind === kind).slice(0, 3)
+            .map((l) => [db.entities[l.from]?.name, kind.toLowerCase().replace(/_/g, " "), db.entities[l.to]?.name].join(" ")) }));
+      const pages = Object.values(db.entities);
+      const kinds = [...counts(pages, (e) => e.kind)]
+        .filter(([kind]) => !KNOWN_KINDS.includes(kind) && kept("kind:" + kind))
+        .map(([kind, count]) => ({ name: kind, label: kind, count, examples: pages.filter((e) => e.kind === kind).slice(0, 3).map((e) => e.name) }));
+      const weight = (e) => db.links.filter((l) => l.from === e.id || l.to === e.id).length + Object.keys(e.info).length + (e.notes.trim() ? 1 : 0);
+      const duplicates = [];
+      const comparable = pages.filter((e) => e.kind !== "Task" && e.kind !== "Note");
+      comparable.forEach((a, i) => comparable.slice(i + 1).forEach((b) => {
+        if (a.kind !== b.kind) return;
+        if (db.links.some((l) => (l.from === a.id && l.to === b.id) || (l.from === b.id && l.to === a.id))) return;
+        const [keep, remove] = weight(a) > weight(b) || (weight(a) === weight(b) && a.name.length <= b.name.length) ? [a, b] : [b, a];
+        if (db.decisions.includes("distinct:" + [keep.id, remove.id].sort().join("|"))) return;
+        if ((keep.aliases ?? []).some((al) => al.toLowerCase() === remove.name.toLowerCase())) return;
+        const reason = looksLike(keep.name, remove.name);
+        if (reason) duplicates.push({ keep, remove, reason });
+      }));
+      return { relations, kinds, duplicates, count: relations.length + kinds.length + duplicates.length };
+    };
     const channels = {};
     // Assistant setup: pass ?setup=fresh to start with nothing installed.
     const fresh = location.search.includes("setup=fresh");
@@ -172,22 +230,24 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
       codes: [],
       claude: { installed: !fresh, signed_in: !fresh, account: "prof@example.edu", version: "2.1.273 (Claude Code)" },
       codex: { installed: fresh, signed_in: false, account: null, version: "codex-cli 0.154.0" },
+      gemini: { installed: false, signed_in: false, account: null, version: "0.60.0" },
+      template: null,
     };
     window.__setup = setup;
     const assistantInfo = (kind) => ({
       kind,
-      label: kind === "claude" ? "Claude Code" : "Codex",
+      label: { claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI" }[kind],
       installed: setup[kind].installed,
       version: setup[kind].installed ? setup[kind].version : null,
       signed_in: setup[kind].signed_in,
       account: setup[kind].signed_in ? setup[kind].account : null,
-      install_command: kind === "claude" ? "curl -fsSL https://claude.ai/install.sh | bash" : "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
-      requirement: kind === "claude" ? "a Claude Pro or Max plan, or an Anthropic Console account" : "a ChatGPT Plus, Pro, Business or Enterprise plan",
+      install_command: { claude: "curl -fsSL https://claude.ai/install.sh | bash", codex: "curl -fsSL https://chatgpt.com/codex/install.sh | sh", gemini: "npm install -g --prefix ~/.local @google/gemini-cli" }[kind],
+      requirement: { claude: "a Claude Pro or Max plan, or an Anthropic Console account", codex: "a ChatGPT Plus, Pro, Business or Enterprise plan", gemini: "a Google account (free tier included), a Gemini Code Assist licence, or an API key" }[kind],
     });
     const assistantState = () => ({
       chosen: setup.chosen,
       ready: !!setup.chosen && setup[setup.chosen].installed && setup[setup.chosen].signed_in,
-      assistants: [assistantInfo("claude"), assistantInfo("codex")],
+      assistants: [assistantInfo("claude"), assistantInfo("codex"), assistantInfo("gemini")],
       calendar_status: "needs-auth",
       calendar_help: "To connect Google Calendar, run claude in Terminal, type /mcp, and choose \\"claude.ai Google Calendar\\".",
     });
@@ -358,8 +418,73 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
             return null;
           case "set_task_done": db.entities[args.id].info.status = args.done ? "done" : "open"; return db.entities[args.id];
           case "list_entities": return Object.values(db.entities).filter((e) => e.kind === args.kind);
+          case "google_status": return {
+            client_set: db.google.clientSet,
+            connected: db.google.connected,
+            account: db.google.connected ? "prof@example.edu" : null,
+            offers: Object.values(db.entities)
+              .filter((e) => e.kind === "Task" && (e.info.due ?? "").includes("T") && e.info.status !== "done" && !("calendar" in e.info))
+              .map((task) => ({ task, start: task.info.due + ":00+05:30", end: task.info.due + ":00+05:30", when: "Fri 18 Sep, 11:00" })),
+          };
+          case "set_google_client": db.google.clientSet = true; return null;
+          case "connect_google": await wait(400); db.google.connected = true; return "prof@example.edu";
+          case "disconnect_google": db.google.connected = false; return null;
+          case "add_task_to_calendar":
+            db.entities[args.id].info.calendar = "evt_" + Object.keys(db.entities).length;
+            return "https://calendar.google.com/event?eid=abc";
+          case "skip_task_calendar": db.entities[args.id].info.calendar = "no"; return null;
+          case "remove_task_from_calendar": delete db.entities[args.id].info.calendar; return null;
+          case "calendar_feed": return {
+            webcal: "webcal://127.0.0.1:8471/" + feedKey + "/Suk.ics",
+            url: "http://127.0.0.1:8471/" + feedKey + "/Suk.ics",
+            on: db.calendarOn,
+            blocks: 2,
+            file: "/Users/prof/Documents/Suk/Suk.ics",
+          };
+          case "set_calendar_feed": db.calendarOn = args.on; return null;
+          case "subscribe_calendar": return null;
+          case "save_calendar_file": return "/Users/prof/Documents/Suk/Suk.ics";
+          case "tidy_items": return tidyItems();
+          case "keep_type": db.decisions.push(args.what + ":" + args.name); return null;
+          case "rename_type": {
+            let changed = 0;
+            if (args.what === "relation") { for (const l of db.links) if (l.kind === args.name) { l.kind = args.newName; changed++; } }
+            else { for (const e of Object.values(db.entities)) if (e.kind === args.name) { e.kind = args.newName; changed++; } }
+            db.decisions.push(args.what + ":" + args.name, args.what + ":" + args.newName);
+            return changed;
+          }
+          case "remove_relation_type": {
+            const before = db.links.length;
+            db.links = db.links.filter((l) => l.kind !== args.name);
+            return before - db.links.length;
+          }
+          case "merge_pages": {
+            const keep = db.entities[args.keep], gone = db.entities[args.remove];
+            keep.info = { ...gone.info, ...keep.info };
+            keep.tags = [...new Set([...keep.tags, ...gone.tags])];
+            keep.aliases = [...new Set([...(keep.aliases ?? []), ...(gone.aliases ?? []), gone.name])];
+            if (gone.notes.trim()) keep.notes = [keep.notes, gone.notes].filter((n) => n.trim()).join("\\n\\n");
+            for (const l of db.links) { if (l.from === gone.id) l.from = keep.id; if (l.to === gone.id) l.to = keep.id; }
+            delete db.entities[gone.id];
+            return keep;
+          }
+          case "not_duplicates": db.decisions.push("distinct:" + [args.a, args.b].sort().join("|")); return null;
           case "assistant_status": return assistantState();
           case "choose_assistant": setup.chosen = args.kind; return null;
+          case "templates": return [[
+            { id: "academic", name: "Academic", about: "Professors, postdocs and researchers", adds: ["Students, Projects, Courses and Research areas in the sidebar", "The assistant knows about theses, courses, grants and committees"] },
+            { id: "general", name: "General", about: "Anyone running projects and people", adds: ["People and Projects in the sidebar"] },
+          ], setup.template];
+          case "apply_template": {
+            setup.template = args.id;
+            const wanted = args.id === "academic" ? [["student", "Students"], ["project", "Projects"], ["course", "Courses"], ["research-area", "Research areas"]] : [["person", "People"], ["project", "Projects"]];
+            const added = [];
+            for (const [tag, title] of wanted) {
+              if (!db.sections.some((s) => s.tag === tag)) { db.sections.push({ tag, title, pinned: true, icon: "" }); added.push(title); }
+            }
+            return added;
+          }
+          case "new_conversation": window.__newConversations = (window.__newConversations ?? 0) + 1; return null;
           case "install_assistant": {
             let i = 0;
             for (const line of ["Setting up Claude Code...", "Downloading claude 2.1.273 for darwin-arm64", "✔ Claude Code successfully installed!", "Location: ~/.local/bin/claude"]) {
@@ -371,6 +496,12 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
           }
           case "sign_in_assistant": {
             await wait(300);
+            if (args.kind === "gemini") {
+              channels[args.onPrompt?.id]?.({ index: 0, message: { url: null, code: null, needs_code: false, in_terminal: true } });
+              await new Promise((resolve, reject) => { setup.finishSignIn = resolve; setup.cancelSignIn = reject; });
+              setup.gemini.signed_in = true;
+              return assistantInfo("gemini");
+            }
             const prompt = args.kind === "claude"
               ? { url: "https://claude.com/cai/oauth/authorize?code=true", code: null, needs_code: true }
               : { url: "https://auth.openai.com/codex/device", code: "IB3U-Y26HE", needs_code: false };
@@ -909,6 +1040,173 @@ await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-sch
 await sleep(300);
 await shot("47-task-details-dark");
 await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }] });
+
+// The calendar: a week of tasks and blocks, then the month.
+await click(".nav-item", "Calendar");
+await sleep(700);
+results.calendarWeek = await evaluate(`({
+  title: document.querySelector('.page-header .muted')?.textContent,
+  days: [...document.querySelectorAll('.cal-grid.week .cal-day')].length,
+  today: document.querySelector('.cal-day.today .cal-number')?.textContent,
+  entries: [...document.querySelectorAll('.cal-entry')].map(e => e.textContent),
+})`);
+await shot("47-calendar-week");
+await click(".segmented button", "Month");
+await sleep(500);
+results.calendarMonth = await evaluate(`({
+  title: document.querySelector('.page-header .muted')?.textContent,
+  cells: document.querySelectorAll('.cal-grid.month .cal-day').length,
+  weekdays: [...document.querySelectorAll('.cal-weekdays span')].map(s => s.textContent),
+  outside: document.querySelectorAll('.cal-day.outside').length,
+})`);
+await shot("48-calendar-month");
+await click(".cal-controls .icon-button");
+await sleep(400);
+results.calendarBack = await evaluate("document.querySelector('.page-header .muted')?.textContent");
+await click(".cal-controls .button", "Today");
+await sleep(400);
+
+// Today, in tabs: what's due, what's important, what has a date, and what's with other people.
+await click(".nav-item", "Today");
+await sleep(700);
+results.tabs = await evaluate("[...document.querySelectorAll('.tab')].map(t => t.textContent)");
+await shot("49-today-tabs");
+for (const name of ["Important", "Has a date", "Follow up"]) {
+  await click(".tab", name);
+  await sleep(500);
+  results[`tab${name.replace(/ /g, "")}`] = await evaluate(`({
+    tasks: [...document.querySelectorAll('.task-title')].map(t => t.textContent),
+    groups: [...document.querySelectorAll('.task-groups section h3, .task-groups .group-title')].map(h => h.textContent),
+    empty: document.querySelector('.empty.calm p')?.textContent ?? null,
+  })`);
+  await shot(`50-tab-${name.toLowerCase().replace(/ /g, "-")}`);
+}
+await click(".tab", "Today");
+await sleep(500);
+
+// Google Calendar: the question in Today before anything is sent, then signing in.
+results.askBeforeConnect = await evaluate(`(() => {
+  const card = document.querySelector('.ask-card');
+  return card && { text: card.querySelector('.ask-text').textContent, button: card.querySelector('.button')?.textContent };
+})()`);
+await shot("51-calendar-ask-connect");
+await click(".ask-card .button", "Sign in");
+await sleep(600);
+results.googleBeforeSignIn = await evaluate(`(() => {
+  const row = [...document.querySelectorAll('.settings-row')].find(r => r.querySelector('.model-name')?.textContent === 'Google Calendar');
+  return { text: row.querySelector('.muted').textContent, button: row.querySelector('.button')?.textContent, setupForm: !!row.querySelector('.client-form') };
+})()`);
+await shot("52-google-sign-in");
+await click(".settings-row .button", "Sign in with Google");
+await sleep(1200);
+results.googleConnected = await evaluate(`(() => {
+  const row = [...document.querySelectorAll('.settings-row')].find(r => r.querySelector('.model-name')?.textContent === 'Google Calendar');
+  return { text: row.querySelector('.muted').textContent, button: row.querySelector('.button')?.textContent };
+})()`);
+await shot("53-google-connected");
+await click(".nav-item", "Today");
+await sleep(700);
+results.askToAdd = await evaluate(`(() => {
+  const card = document.querySelector('.ask-card');
+  return { title: card.querySelector('.ask-title').textContent, rows: [...card.querySelectorAll('.ask-list li')].map(li => li.textContent) };
+})()`);
+await shot("54-calendar-ask");
+await click(".ask-list .button", "Add");
+await sleep(700);
+results.afterAdd = await evaluate(`({
+  note: document.querySelector('.ask-card .form-note')?.textContent ?? null,
+  gone: !document.querySelector('.ask-card'),
+  call: window.__invokes.filter(i => i.cmd === 'add_task_to_calendar').at(-1)?.args,
+})`);
+await shot("55-calendar-added");
+
+// The calendar feed in Settings: the link, the switch, and the file for Google.
+await click(".nav-item", "Settings");
+await sleep(600);
+results.calendar = await evaluate(`(() => {
+  const card = [...document.querySelectorAll('.section-title')].find(t => t.textContent === 'Calendar')?.nextElementSibling;
+  return {
+    rows: [...card.querySelectorAll('.settings-row .model-name')].map(n => n.textContent),
+    link: card.querySelector('code')?.textContent,
+    note: [...card.querySelectorAll('.system')].map(p => p.textContent),
+    on: card.querySelector('.switch input')?.checked,
+  };
+})()`);
+await shot("56-calendar-settings");
+await evaluate("[...document.querySelectorAll('.switch input')][0].click()");
+await sleep(400);
+results.calendarOff = await evaluate(`(() => {
+  const card = [...document.querySelectorAll('.section-title')].find(t => t.textContent === 'Calendar')?.nextElementSibling;
+  return { note: card.querySelector('.system:last-of-type')?.textContent, subscribeDisabled: card.querySelector('.button')?.disabled, call: window.__invokes.filter(i => i.cmd === 'set_calendar_feed').at(-1)?.args };
+})()`);
+await shot("57-calendar-off");
+await evaluate("[...document.querySelectorAll('.switch input')][0].click()");
+await sleep(400);
+await click(".settings-card .button", "Save file");
+await sleep(500);
+results.calendarSaved = await evaluate("document.querySelector('.form-note')?.textContent");
+
+// Tidy up: what Suk started organizing on its own, decided on one item at a time.
+results.tidyNav = await evaluate("[...document.querySelectorAll('.nav-bottom .nav-item')].map(n => n.textContent)");
+await click(".nav-bottom .nav-item", "Tidy up");
+await sleep(600);
+results.tidy = await evaluate(`({
+  sections: [...document.querySelectorAll('.section-title')].map(t => t.textContent),
+  items: [...document.querySelectorAll('.tidy-item')].map(i => i.querySelector('.tidy-main').textContent),
+  actions: [...new Set([...document.querySelectorAll('.tidy-actions button')].map(b => b.textContent))],
+})`);
+await shot("58-tidy-up");
+// The relationship it invented is fine as it is.
+await evaluate("[...document.querySelectorAll('.tidy-item')].find(i => i.textContent.includes('REVIEWS')).querySelector('button').click()");
+await sleep(600);
+// Two pages for one student become one.
+await click(".tidy-actions .button", "Merge into");
+await sleep(700);
+results.tidyAfterMerge = await evaluate(`({
+  items: [...document.querySelectorAll('.tidy-item')].map(i => i.querySelector('.tidy-title').textContent),
+  kept: window.__invokes.filter(i => i.cmd === 'merge_pages').at(-1)?.args,
+})`);
+await shot("59-tidy-after-merge");
+// The new kind of page gets a name the user prefers.
+await click(".tidy-actions .button.ghost", "Rename or merge");
+await sleep(200);
+await evaluate("(() => { const i = document.querySelector('.tidy-item input'); i.select(); })()");
+await type("Funding");
+await key("Enter");
+await sleep(700);
+results.tidyEnd = await evaluate(`({
+  empty: document.querySelector('.empty.calm p')?.textContent,
+  nav: [...document.querySelectorAll('.nav-bottom .nav-item')].map(n => n.textContent),
+  calls: window.__invokes.filter(i => ['keep_type', 'rename_type', 'merge_pages', 'not_duplicates', 'remove_relation_type'].includes(i.cmd)).map(i => i.cmd + ' ' + JSON.stringify(i.args)),
+})`);
+await shot("60-tidy-empty");
+
+// A third assistant and the starter template on the setup screen.
+await send("Page.navigate", { url: "http://localhost:1420/?setup=fresh" });
+await sleep(2200);
+setupResults.threeOptions = await texts(".setup-option .setup-option-name");
+await click(".setup-option", "Gemini");
+await sleep(200);
+setupResults.geminiSteps = await texts(".setup-steps > li .setup-step-title");
+await shot("61-setup-gemini");
+await click(".setup-option", "Claude Code");
+await sleep(200);
+await click(".setup-steps .button.primary", "Install");
+await sleep(1400);
+await click(".setup-steps .button.primary", "Sign in");
+await sleep(600);
+await focus(".setup-code-form input");
+await type("code-123");
+await key("Enter");
+await sleep(900);
+setupResults.starters = await texts(".setup-starter .choice-chip");
+await shot("62-setup-template");
+await click(".setup-starter .choice-chip", "Academic");
+await sleep(150);
+await click(".setup-footer .button.primary", "Start");
+await sleep(1200);
+setupResults.afterTemplate = await evaluate("({ sections: [...document.querySelectorAll('.nav-sections .nav-item')].map(n => n.textContent), template: window.__setup.template })");
+await shot("63-academic-sidebar");
 
 results.setup = setupResults;
 results.consoleErrors = consoleErrors;

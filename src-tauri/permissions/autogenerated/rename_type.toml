@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rename-type"
+description = "Enables the rename_type command without any pre-configured scope."
+commands.allow = ["rename_type"]
+
+[[permission]]
+identifier = "deny-rename-type"
+description = "Denies the rename_type command without any pre-configured scope."
+commands.deny = ["rename_type"]

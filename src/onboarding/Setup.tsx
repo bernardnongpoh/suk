@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  applyTemplate,
   assistantStatus,
   cancelSignIn,
   chooseAssistant,
@@ -7,10 +8,12 @@ import {
   openUrl,
   signInAssistant,
   submitSignInCode,
+  templates,
   type AssistantInfo,
   type AssistantKind,
   type AssistantStatus,
   type SignInPrompt,
+  type Template,
 } from "../api";
 import Icon from "../ui/Icon";
 
@@ -34,6 +37,12 @@ const ABOUT: Record<AssistantKind, { by: string; perks: string; signUp: string; 
     signUp: "https://chatgpt.com/pricing",
     signUpLabel: "Get a ChatGPT plan",
   },
+  gemini: {
+    by: "by Google",
+    perks: "Has a free tier",
+    signUp: "https://codeassist.google/",
+    signUpLabel: "About Gemini CLI",
+  },
 };
 
 type Busy = { what: "install"; log: string[] } | { what: "sign-in"; prompt: SignInPrompt | null } | null;
@@ -49,6 +58,9 @@ function Setup({ onReady, onCancel }: Props) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  // The starter template: which sections the sidebar begins with.
+  const [starters, setStarters] = useState<Template[]>([]);
+  const [starter, setStarter] = useState<string | null>(null);
   const logRef = useRef<HTMLPreElement>(null);
 
   const refresh = async () => {
@@ -63,6 +75,13 @@ function Setup({ onReady, onCancel }: Props) {
       setChecking(false);
     }
   };
+
+  useEffect(() => {
+    templates().then(([all, chosen]) => {
+      setStarters(all);
+      setStarter(chosen ?? all[0]?.id ?? null);
+    }, () => {});
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -121,6 +140,7 @@ function Setup({ onReady, onCancel }: Props) {
     if (!info) return;
     try {
       await chooseAssistant(info.kind);
+      if (starter) await applyTemplate(starter);
       onReady();
     } catch (err) {
       setError(String(err));
@@ -233,6 +253,16 @@ function Setup({ onReady, onCancel }: Props) {
                           <p className="busy">
                             <span className="spinner" /> Opening the sign-in page…
                           </p>
+                        ) : signInPrompt.in_terminal ? (
+                          <div className="setup-signin">
+                            <p>
+                              A terminal window opened with {info.label}. Choose how to sign in there and follow the steps;
+                              this page continues by itself once you're done.
+                            </p>
+                            <p className="busy">
+                              <span className="spinner" /> Waiting for the terminal…
+                            </p>
+                          </div>
                         ) : info.kind === "codex" ? (
                           <div className="setup-signin">
                             <p>A sign-in page opened in your browser. Enter this code there:</p>
@@ -258,11 +288,13 @@ function Setup({ onReady, onCancel }: Props) {
                             </form>
                           </div>
                         )}
-                        {signInPrompt?.url && (
+                        {(signInPrompt?.url || signInPrompt?.in_terminal) && (
                           <div className="setup-actions">
-                            <button className="text-button" onClick={() => openUrl(signInPrompt.url!).catch(() => {})}>
-                              Open the sign-in page again
-                            </button>
+                            {signInPrompt.url && (
+                              <button className="text-button" onClick={() => openUrl(signInPrompt.url!).catch(() => {})}>
+                                Open the sign-in page again
+                              </button>
+                            )}
                             <button className="text-button muted-link" onClick={() => cancelSignIn()}>
                               Cancel
                             </button>
@@ -273,6 +305,27 @@ function Setup({ onReady, onCancel }: Props) {
                   </div>
                 </li>
               </ol>
+            )}
+
+            {info?.signed_in && starters.length > 0 && (
+              <div className="setup-starter">
+                <div className="setup-step-title">What do you do?</div>
+                <p className="muted small">Sets up the sidebar and the words the assistant uses. You can change it later.</p>
+                <div className="choice-chips">
+                  {starters.map((t) => (
+                    <button
+                      key={t.id}
+                      className={`choice-chip${starter === t.id ? " on" : ""}`}
+                      aria-pressed={starter === t.id}
+                      title={t.adds.join(". ")}
+                      onClick={() => setStarter(t.id)}
+                    >
+                      {t.name}
+                      <span className="muted small"> · {t.about}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
 
             {error && <p className="form-error setup-error">{error}</p>}
@@ -294,8 +347,8 @@ function Setup({ onReady, onCancel }: Props) {
 
             {!status.assistants.some((a) => a.signed_in) && (
               <div className="setup-need">
-                <strong>Don't have either?</strong> Suk can't run without Claude Code or Codex. They come with a
-                paid Claude or ChatGPT plan.{" "}
+                <strong>Don't have any of them?</strong> Suk can't run without one. Claude Code and Codex come with
+                a paid Claude or ChatGPT plan; Gemini CLI has a free tier.{" "}
                 {kind && (
                   <button className="text-button" onClick={() => openUrl(ABOUT[kind].signUp).catch(() => {})}>
                     {ABOUT[kind].signUpLabel}

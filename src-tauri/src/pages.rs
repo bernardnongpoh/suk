@@ -212,6 +212,16 @@ pub fn claude_message(
 ) -> Result<String, String> {
     let mut content = String::new();
     let mentioned: Vec<&Entity> = mentioned.iter().filter(|m| Some(&m.id) != focus.map(|f| &f.id)).collect();
+    // Saved pages the message names, in a line each, so they needn't be looked up.
+    let skip: Vec<&str> = mentioned.iter().map(|m| m.id.as_str()).chain(focus.map(|f| f.id.as_str())).collect();
+    let known = known_pages(graph, message, &skip).map_err(|e| e.to_string())?;
+    if !known.is_empty() {
+        content.push_str("[Known] Saved pages this message names:\n");
+        for page in &known {
+            content.push_str(&format!("- {}\n", page_line(graph, page).map_err(|e| e.to_string())?));
+        }
+        content.push('\n');
+    }
     if !mentioned.is_empty() {
         content.push_str("[Mentioned] Pages the user picked while typing:\n");
         for page in mentioned {
@@ -228,6 +238,106 @@ pub fn claude_message(
     }
     content.push_str(message);
     Ok(content)
+}
+
+/// How many recent messages a new session is told about.
+const BRIEF_MESSAGES: usize = 6;
+
+/// For a new session: the last few messages of the main chat, shortened, so a follow-up like "and
+/// her email?" still makes sense. Empty when there's nothing yet.
+pub fn recent_brief(graph: &Graph) -> Result<String, GraphError> {
+    let messages = graph.recent_messages(BRIEF_MESSAGES)?;
+    if messages.is_empty() {
+        return Ok(String::new());
+    }
+    let mut brief = String::from("[App] A new conversation started. The last messages, for context (everything saved is in the app):\n");
+    for m in messages {
+        let text: String = m.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let short: String = text.chars().take(240).collect();
+        let who = if m.role == "user" { "User" } else { "You" };
+        brief.push_str(&format!("- {who}: {short}{}\n", if text.chars().count() > 240 { "…" } else { "" }));
+    }
+    brief.push('\n');
+    Ok(brief)
+}
+
+/// At most this many known pages go with a message.
+const MAX_KNOWN: usize = 8;
+
+/// Whether `phrase` appears in `text` as whole words (both lowercase).
+fn has_phrase(text: &str, phrase: &str) -> bool {
+    let boundary = |c: Option<char>| c.is_none_or(|c| !c.is_alphanumeric());
+    text.match_indices(phrase).any(|(i, _)| boundary(text[..i].chars().next_back()) && boundary(text[i + phrase.len()..].chars().next()))
+}
+
+/// Saved pages a message names by name or other name, or a person by a first name no one else
+/// shares; longest names first.
+pub fn known_pages(graph: &Graph, message: &str, skip: &[&str]) -> Result<Vec<Entity>, GraphError> {
+    let text = message.to_lowercase();
+    let all = graph.all_entities()?;
+    let first_name = |e: &Entity| e.name.split_whitespace().next().map(str::to_lowercase).filter(|f| f.chars().count() >= 3 && f != &e.name.to_lowercase());
+    let mut found: Vec<(usize, Entity)> = Vec::new();
+    for entity in &all {
+        if skip.contains(&entity.id.as_str()) || entity.kind == "Note" && entity.name.chars().count() < 4 {
+            continue;
+        }
+        let names = std::iter::once(entity.name.to_lowercase()).chain(entity.aliases.iter().map(|a| a.to_lowercase()));
+        let mut best = names.filter(|n| n.chars().count() >= 3 && has_phrase(&text, n)).map(|n| n.len()).max();
+        if best.is_none() && entity.kind == "Person" {
+            if let Some(first) = first_name(entity) {
+                let shared = all.iter().filter(|o| o.kind == "Person" && first_name(o).as_deref() == Some(first.as_str())).count();
+                if shared == 1 && has_phrase(&text, &first) {
+                    best = Some(first.len());
+                }
+            }
+        }
+        if let Some(length) = best {
+            found.push((length, entity.clone()));
+        }
+    }
+    found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+    Ok(found.into_iter().take(MAX_KNOWN).map(|(_, e)| e).collect())
+}
+
+/// A page in one short line: "Satya Das — Person; student; email satya@example.edu; works on
+/// Compiler Fuzzing".
+pub fn page_line(graph: &Graph, entity: &Entity) -> Result<String, GraphError> {
+    const MAX_FACTS: usize = 4;
+    let mut parts = vec![entity.kind.clone()];
+    let kind = crate::graph::kind_tag(&entity.kind);
+    let tags: Vec<&String> = entity.tags.iter().filter(|t| **t != kind).collect();
+    if !tags.is_empty() {
+        parts.push(tags.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(", "));
+    }
+    let details: Vec<String> = entity
+        .info
+        .iter()
+        .filter(|(k, _)| !["icon", DETAILS_SKIPPED].contains(&k.as_str()))
+        .map(|(k, v)| format!("{k} {v}"))
+        .collect();
+    if !details.is_empty() {
+        parts.push(details.join(", "));
+    }
+    let links = graph.links(&entity.id)?;
+    let facts: Vec<String> = links
+        .iter()
+        .filter(|l| l.kind != "MENTIONED_IN")
+        .map(|l| if l.outgoing { crate::relations::sentence(&entity.name, &l.kind, &l.other.name) } else { crate::relations::sentence(&l.other.name, &l.kind, &entity.name) })
+        .collect();
+    if !facts.is_empty() {
+        let mut shown = facts.iter().take(MAX_FACTS).cloned().collect::<Vec<_>>().join("; ");
+        if facts.len() > MAX_FACTS {
+            shown.push_str(&format!("; {} more (use find)", facts.len() - MAX_FACTS));
+        }
+        parts.push(shown);
+    }
+    if !entity.aliases.is_empty() {
+        parts.push(format!("also called {}", entity.aliases.join(", ")));
+    }
+    if !entity.notes.trim().is_empty() {
+        parts.push("has notes (use find)".into());
+    }
+    Ok(format!("{} — {}", entity.name, parts.join("; ")))
 }
 
 /// What the app offers after a turn.
@@ -507,6 +617,45 @@ pub fn details_requests(created: &[Entity]) -> Vec<DetailsRequest> {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn a_new_session_gets_the_last_messages_shortened() {
+        let g = Graph::in_memory().unwrap();
+        assert_eq!(recent_brief(&g).unwrap(), "");
+        g.add_message("user", "Amit joined as my PhD student", None, &[]).unwrap();
+        g.add_message("agent", &"Saved Amit. ".repeat(40), None, &[]).unwrap();
+        let brief = recent_brief(&g).unwrap();
+        assert!(brief.starts_with("[App] A new conversation started."));
+        assert!(brief.contains("- User: Amit joined as my PhD student\n"));
+        assert!(brief.contains("- You: Saved Amit. Saved") && brief.contains("…\n"));
+    }
+
+    #[test]
+    fn saved_pages_a_message_names_go_with_it_in_a_line_each() {
+        let g = Graph::in_memory().unwrap();
+        let satya = g.upsert_entity("Student", "Satya Das").unwrap();
+        g.update_info(&satya.id, &BTreeMap::from([("email".to_string(), Some("satya@example.edu".to_string()))])).unwrap();
+        let fuzzing = g.upsert_entity("Project", "Compiler Fuzzing").unwrap();
+        g.link(&satya.id, "WORKS_ON", &fuzzing.id).unwrap();
+        let iitg = g.upsert_entity("Organization", "IIT Guwahati").unwrap();
+        g.set_aliases(&iitg.id, &["IITG".into()]).unwrap();
+        g.upsert_entity("Person", "Satyajit Roy").unwrap();
+        g.upsert_entity("Person", "Kavya Rao").unwrap();
+        g.upsert_entity("Person", "Kavya Menon").unwrap();
+
+        let names = |message: &str| known_pages(&g, message, &[]).unwrap().into_iter().map(|e| e.name).collect::<Vec<_>>();
+        assert_eq!(names("Satya Das finished the compiler fuzzing setup at IITG"), vec!["Compiler Fuzzing", "Satya Das", "IIT Guwahati"]);
+        assert_eq!(names("Satya wants to meet"), vec!["Satya Das"], "a first name only one person has");
+        assert!(names("Kavya sent the budget").is_empty(), "two people are called Kavya");
+        assert!(names("Satyajitish and fuzzingbook").is_empty(), "whole words only");
+        assert!(known_pages(&g, "Satya Das", &[satya.id.as_str()]).unwrap().is_empty());
+
+        let line = page_line(&g, &g.get(&satya.id).unwrap().unwrap()).unwrap();
+        assert_eq!(line, "Satya Das — Person; student; email satya@example.edu; Satya Das works on Compiler Fuzzing");
+        let message = claude_message(&g, None, &[], "How is Satya doing?").unwrap();
+        assert!(message.starts_with("[Known] Saved pages this message names:\n- Satya Das — Person"), "{message}");
+        assert!(message.ends_with("\n\nHow is Satya doing?"));
+    }
 
     #[test]
     fn every_kind_of_page_offers_its_usual_details() {

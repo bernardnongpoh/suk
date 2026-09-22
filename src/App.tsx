@@ -3,25 +3,33 @@ import { listen } from "@tauri-apps/api/event";
 import Sidebar from "./navigation/Sidebar";
 import ChatView from "./chat/ChatView";
 import SearchPalette from "./search/SearchPalette";
+import CalendarView from "./views/CalendarView";
 import TodayView from "./views/TodayView";
 import NotesView from "./views/NotesView";
 import PageView from "./views/PageView";
 import SectionView from "./views/SectionView";
 import SettingsView from "./views/SettingsView";
+import TidyView from "./views/TidyView";
 import UpdatesView from "./views/UpdatesView";
 import Icon from "./ui/Icon";
 import Setup from "./onboarding/Setup";
-import { assistantStatus, getSidebar, listUpdates, type Sidebar as SidebarData } from "./api";
+import { assistantStatus, getSidebar, listUpdates, newConversation, tidyItems, type Sidebar as SidebarData } from "./api";
 import type { ChatMessage, Route } from "./types";
 import "./App.css";
 
 const PLAN_PROMPT = "What should I focus on today? Plan my day.";
+
+/** Whether a chat is waiting on something: a reply, a schedule to confirm, or a form to fill in. */
+const waiting = (messages: ChatMessage[]) =>
+  messages.some((m) => m.proposals?.some((p) => p.status === "pending") || (m.details?.length ?? 0) > 0);
 
 function App() {
   // Opening pages pushes onto the stack, so Back returns to where you were.
   const [stack, setStack] = useState<Route[]>([{ view: "chat" }]);
   // Lives here so the conversation survives switching views.
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  // A page's chat, kept only while it's waiting on something; otherwise the page opens clean.
+  const [pageChats, setPageChats] = useState<Record<string, ChatMessage[]>>({});
   const [chatPrompt, setChatPrompt] = useState<string | null>(null);
   const [sidebar, setSidebar] = useState<SidebarData | null>(null);
   const [searching, setSearching] = useState(false);
@@ -30,6 +38,8 @@ function App() {
   // Relevant updates from followed people not yet seen, and the latest arrival to announce.
   const [unread, setUnread] = useState(0);
   const [toast, setToast] = useState<{ title: string; body: string } | null>(null);
+  // New relationships, page types and possible duplicates waiting for a decision.
+  const [toTidy, setToTidy] = useState(0);
 
   // Whether Claude Code or Codex is set up: null while checking. The app can't run without one.
   const [ready, setReady] = useState<boolean | null>(null);
@@ -39,12 +49,21 @@ function App() {
   }, []);
 
   const route = stack[stack.length - 1];
-  const select = (r: Route) => setStack([r]);
-  const open = (id: string) =>
+  const select = (r: Route) => {
+    // Clicking Chat again starts a new conversation; what was said stays saved.
+    if (r.view === "chat" && route.view === "chat" && chatMessages.length > 0) {
+      setChatMessages([]);
+      newConversation().catch(() => {});
+    }
+    setStack([r]);
+  };
+  const open = (id: string) => {
+    setPageChats((chats) => (waiting(chats[id] ?? []) ? chats : { ...chats, [id]: [] }));
     setStack((s) => {
       const top = s[s.length - 1];
       return top.view === "page" && top.id === id ? s : [...s, { view: "page", id }];
     });
+  };
   const back = stack.length > 1 ? () => setStack((s) => s.slice(0, -1)) : null;
 
   const changed = useCallback(() => {
@@ -57,6 +76,10 @@ function App() {
   }, []);
 
   useEffect(countUnread, [countUnread, version]);
+
+  useEffect(() => {
+    tidyItems().then((items) => setToTidy(items.count), () => {});
+  }, [version]);
 
   useEffect(() => {
     if (!toast) return;
@@ -81,6 +104,8 @@ function App() {
     getSidebar().then(setSidebar, () => {});
     // Edits made to the Markdown files, in Obsidian or any editor.
     const unlisten = listen("pages-changed", changed).catch(() => () => {});
+    // The macOS menu owns ⌘K, so search opens from there too.
+    const stopSearch = listen("open-search", () => setSearching(true)).catch(() => () => {});
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -91,6 +116,7 @@ function App() {
     return () => {
       window.removeEventListener("keydown", onKey);
       unlisten.then((stop) => stop());
+      stopSearch.then((stop) => stop());
     };
   }, [changed]);
 
@@ -116,6 +142,7 @@ function App() {
         route={route}
         data={sidebar}
         unread={unread}
+        toTidy={toTidy}
         onSelect={select}
         onSearch={() => setSearching(true)}
         onOpen={open}
@@ -128,6 +155,7 @@ function App() {
             onOpen={open}
             onUpdates={() => select({ view: "updates" })}
             onChanged={changed}
+            onSettings={() => select({ view: "settings" })}
             onPlan={() => {
               setChatPrompt(PLAN_PROMPT);
               select({ view: "chat" });
@@ -138,12 +166,14 @@ function App() {
           <ChatView
             messages={chatMessages}
             setMessages={setChatMessages}
+            loadHistory
             prompt={chatPrompt}
             onPromptSent={() => setChatPrompt(null)}
             onChanged={changed}
             onOpen={open}
           />
         )}
+        {route.view === "calendar" && <CalendarView version={version} onOpen={open} />}
         {route.view === "updates" && <UpdatesView version={version} onOpen={open} />}
         {route.view === "notes" && <NotesView version={version} onOpen={open} onChanged={changed} />}
         {route.view === "section" && (
@@ -158,9 +188,24 @@ function App() {
           />
         )}
         {route.view === "page" && (
-          <PageView key={route.id} id={route.id} version={version} onOpen={open} onBack={back} onChanged={changed} />
+          <PageView
+            key={route.id}
+            id={route.id}
+            version={version}
+            messages={pageChats[route.id] ?? []}
+            setMessages={(update) =>
+              setPageChats((chats) => ({
+                ...chats,
+                [route.id]: typeof update === "function" ? update(chats[route.id] ?? []) : update,
+              }))
+            }
+            onOpen={open}
+            onBack={back}
+            onChanged={changed}
+          />
         )}
-        {route.view === "settings" && <SettingsView onChangeAssistant={() => setChangingAssistant(true)} />}
+        {route.view === "tidy" && <TidyView version={version} onOpen={open} onChanged={changed} />}
+        {route.view === "settings" && <SettingsView onChangeAssistant={() => setChangingAssistant(true)} onChanged={changed} />}
       </main>
       {toast && (
         <div className="toast" role="status">

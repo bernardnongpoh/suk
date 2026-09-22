@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-disconnect-google"
+description = "Enables the disconnect_google command without any pre-configured scope."
+commands.allow = ["disconnect_google"]
+
+[[permission]]
+identifier = "deny-disconnect-google"
+description = "Denies the disconnect_google command without any pre-configured scope."
+commands.deny = ["disconnect_google"]

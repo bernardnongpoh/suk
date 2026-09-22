@@ -1,6 +1,6 @@
 [package]
 name = "suk"
-version = "0.1.0"
+version = "0.2.0"
 description = "Tell it what's going on; it keeps your work in order"
 authors = ["Bernard Nongpoh"]
 edition = "2021"
@@ -22,11 +22,14 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 lbug = "0.20.4"
-reqwest = "0.13.5"
+reqwest = { version = "0.13.5", features = ["json", "form"] }
 tokio = { version = "1", features = ["net", "rt"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 uuid = { version = "1", features = ["v4"] }
+# For the Google sign-in flow: PKCE challenges and the id_token's payload.
+sha2 = "0.10"
+base64 = "0.22"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

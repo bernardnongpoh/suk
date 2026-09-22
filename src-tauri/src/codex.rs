@@ -24,6 +24,8 @@ const TURN_TIMEOUT: Duration = Duration::from_secs(300);
 const ONE_SHOT_TIMEOUT: Duration = Duration::from_secs(180);
 /// Where the thread id is kept, so the conversation continues after the app restarts.
 const THREAD_FILE: &str = "thread-id";
+/// The day the saved thread started; a new day starts a new thread.
+const THREAD_DATE_FILE: &str = "thread-date";
 /// The environment variable Codex reads the app's MCP token from.
 const TOKEN_VARIABLE: &str = "SUK_MCP_TOKEN";
 /// Codex tools that have nothing to do with this app.
@@ -54,6 +56,8 @@ pub struct Setup {
     /// An empty directory to run in, so no project files or instructions are picked up.
     pub workdir: PathBuf,
     pub mcp: Endpoint,
+    /// Added to the instructions: what kind of work the user does.
+    pub about_user: String,
 }
 
 #[derive(Default)]
@@ -63,6 +67,26 @@ pub struct Codex {
 }
 
 impl Codex {
+    /// Forgets the current thread, so the next message starts a new conversation.
+    pub fn start_over(&self, setup: &Setup) {
+        *self.thread.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        let _ = std::fs::remove_file(setup.workdir.join(THREAD_FILE));
+    }
+
+    /// Starts a new thread on a new day. Returns whether the next message begins a new thread.
+    pub fn begins_fresh(&self, setup: &Setup) -> bool {
+        let mut thread = self.thread.lock().unwrap_or_else(|e| e.into_inner());
+        let saved = thread.is_some() || setup.workdir.join(THREAD_FILE).exists();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let started = std::fs::read_to_string(setup.workdir.join(THREAD_DATE_FILE)).unwrap_or_default();
+        if saved && started.trim() != today {
+            *thread = None;
+            let _ = std::fs::remove_file(setup.workdir.join(THREAD_FILE));
+            return true;
+        }
+        !saved
+    }
+
     /// Sends a message and waits for Codex's reply, reporting progress through `on_status`.
     pub fn send(&self, setup: &Setup, message: &str, on_status: &mut dyn FnMut(&str)) -> Result<Turn, String> {
         let mut thread = self.thread.lock().unwrap_or_else(|e| e.into_inner());
@@ -76,9 +100,10 @@ impl Codex {
             Ok((id, text)) => {
                 if let Some(id) = id.filter(|id| thread.as_deref() != Some(id)) {
                     let _ = std::fs::write(setup.workdir.join(THREAD_FILE), &id);
+                    let _ = std::fs::write(setup.workdir.join(THREAD_DATE_FILE), chrono::Local::now().format("%Y-%m-%d").to_string());
                     *thread = Some(id);
                 }
-                Ok(Turn { text, created_events: Vec::new() })
+                Ok(Turn { text, created_events: Vec::new(), usage: Default::default() })
             }
             // A saved thread that can't be resumed: start a new one once.
             Err(e) if thread.is_some() && e.contains("thread") => {
@@ -88,9 +113,10 @@ impl Codex {
                 let (id, text) = run_turn(setup, None, &content, on_status)?;
                 if let Some(id) = id {
                     let _ = std::fs::write(setup.workdir.join(THREAD_FILE), &id);
+                    let _ = std::fs::write(setup.workdir.join(THREAD_DATE_FILE), chrono::Local::now().format("%Y-%m-%d").to_string());
                     *thread = Some(id);
                 }
-                Ok(Turn { text, created_events: Vec::new() })
+                Ok(Turn { text, created_events: Vec::new(), usage: Default::default() })
             }
             Err(e) => Err(e),
         }
@@ -221,7 +247,7 @@ fn arguments(setup: &Setup, thread: Option<&str>) -> Vec<String> {
     let server = format!("mcp_servers.{SERVER_NAME}");
     args.extend([
         "-c".into(),
-        format!("developer_instructions={}", toml_string(&format!("{SYSTEM_PROMPT}{CODEX_NOTE}"))),
+        format!("developer_instructions={}", toml_string(&format!("{SYSTEM_PROMPT}{CODEX_NOTE}{}", setup.about_user))),
         "-c".into(),
         format!("{server}.url={}", toml_string(&setup.mcp.url)),
         "-c".into(),
@@ -295,6 +321,7 @@ mod tests {
             binary: "codex".into(),
             workdir: "/tmp/suk-codex".into(),
             mcp: Endpoint { url: "http://127.0.0.1:4000/mcp".into(), token: "secret".into() },
+            about_user: String::new(),
         }
     }
 
@@ -345,7 +372,7 @@ mod tests {
                 let _ = stream.write_all(b"HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\n\r\n");
             }
         });
-        let setup = Setup { binary: binary.into(), workdir: workdir.clone(), mcp: Endpoint { url: format!("http://127.0.0.1:{port}/mcp"), token: "t".into() } };
+        let setup = Setup { binary: binary.into(), workdir: workdir.clone(), mcp: Endpoint { url: format!("http://127.0.0.1:{port}/mcp"), token: "t".into() }, about_user: String::new() };
         let mut args = arguments(&setup, None);
         args.insert(1, "--strict-config".into());
         let out = Command::new(&setup.binary)
