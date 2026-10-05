@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+parking_lot = "0.12"
 lbug = "0.20.4"
 reqwest = { version = "0.13.5", features = ["json", "form"] }
 tokio = { version = "1", features = ["net", "rt"] }

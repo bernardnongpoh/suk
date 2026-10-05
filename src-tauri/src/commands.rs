@@ -292,6 +292,20 @@ pub async fn dismiss_proposal(app: AppHandle, id: String) -> Result<Proposal, St
     Ok(proposal)
 }
 
+#[derive(Serialize)]
+pub struct Scheduled {
+    event: Entity,
+    /// The tasks the block is for, so they can be ticked off from it.
+    tasks: Vec<Entity>,
+}
+
+/// The day's time blocks (YYYY-MM-DD), earliest first.
+#[tauri::command]
+pub async fn scheduled_on(graph: State<'_, Graph>, day: String) -> Result<Vec<Scheduled>, String> {
+    let day = graph.scheduled_on(&day).map_err(text)?;
+    Ok(day.into_iter().map(|(event, tasks)| Scheduled { event, tasks }).collect())
+}
+
 #[tauri::command]
 pub async fn list_entities(graph: State<'_, Graph>, kind: String) -> Result<Vec<Entity>, String> {
     graph.entities_of_kind(&kind).map_err(|e| e.to_string())

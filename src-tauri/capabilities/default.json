@@ -59,6 +59,7 @@
     "allow-submit-sign-in-code",
     "allow-cancel-sign-in",
     "allow-list-entities",
+    "allow-scheduled-on",
     "allow-get-entity",
     "allow-follow-person",
     "allow-add-profile-links",

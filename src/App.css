@@ -2417,6 +2417,25 @@ kbd {
   color: white;
 }
 
+/* A time block on Today: ticking it ticks off the tasks it is for. */
+.row.scheduled .task-check {
+  margin-top: 0;
+}
+
+.task-check-space {
+  width: 18px;
+  flex-shrink: 0;
+}
+
+.row.scheduled.done {
+  opacity: 0.55;
+}
+
+.row.scheduled.done .row-main {
+  text-decoration: line-through;
+  text-decoration-color: var(--muted);
+}
+
 .task-check.large {
   display: inline-grid;
   width: 24px;

@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lbug::{Connection, Database, SystemConfig, Value};
+use parking_lot::{ReentrantMutex, ReentrantMutexGuard};
 use serde::Serialize;
 
 pub const ENTITY_KINDS: &[&str] = &[
@@ -428,11 +429,84 @@ pub struct Link {
 
 pub struct Graph {
     db: Database,
+    /// Held for every query and checkpoint, so they run one at a time. lbug 0.20.4 fails a write
+    /// that starts while another is open rather than waiting, and lets a query read pages that a
+    /// checkpoint is rewriting, and crashes.
+    gate: ReentrantMutex<()>,
 }
 
 impl Graph {
+    /// Opens the database. A write cut short, e.g. by a crash, can leave the end of the log of
+    /// recent changes unreadable; then both files are copied aside and everything before the
+    /// damage is kept, rather than refusing to start.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, GraphError> {
-        Self::init(Database::new(path, SystemConfig::default())?)
+        let path = path.as_ref();
+        let graph = match Self::open_database(path, false) {
+            Ok(db) => Self::init(db),
+            // Earlier releases kept checksums in the log. Replay it with them, fold it into the
+            // database, and the log starts again without. (Opened the other way, it is discarded.)
+            Err(err) if err.to_string().contains("enableChecksums=True") => {
+                eprintln!("graph: moving the change log off checksums");
+                let db = Self::open_database(path, true)?;
+                Connection::new(&db)?.query("CHECKPOINT;")?;
+                drop(db);
+                Self::init(Self::open_database(path, false)?)
+            }
+            Err(err) => Err(err.into()),
+        }?;
+        // A checkpoint cut short leaves its log, which opening replays into memory and deletes;
+        // write those changes to the file now rather than at the next checkpoint.
+        graph.checkpoint()?;
+        Ok(graph)
+    }
+
+    /// lbug 0.20.4 writes a checksummed log record longer than about 4 KB (a long note, a
+    /// homepage's text) so that it can't be read back: the next start loses it and every change
+    /// after it, or crashes. So the log is written without checksums.
+    fn open_database(path: &Path, checksums: bool) -> Result<Database, lbug::Error> {
+        // Checkpoints only through `checkpoint`, behind the gate; lbug's own run inside a write.
+        let config = || SystemConfig::default().enable_checksums(checksums).auto_checkpoint(false);
+        match Database::new(path, config()) {
+            Err(err) if err.to_string().contains("Corrupted wal") || err.to_string().contains("Checksum verification failed") => {
+                let backup = Self::back_up(path).map_err(|e| {
+                    eprintln!("graph: couldn't back up the database before recovering it: {e}");
+                    err
+                })?;
+                eprintln!("graph: the change log was damaged; recovering. The files as they were are in {}", backup.display());
+                Database::new(path, config().throw_on_wal_replay_failure(false))
+            }
+            result => result,
+        }
+    }
+
+    /// Folds the log of recent changes into the database file, so they don't depend on the log
+    /// being replayed at the next start.
+    pub fn checkpoint(&self) -> Result<(), GraphError> {
+        let _gate = self.gate.lock();
+        Connection::new(&self.db)?.query("CHECKPOINT;")?;
+        Ok(())
+    }
+
+    /// A connection, with the gate held for as long as the caller keeps the guard. Re-entrant, as
+    /// methods call each other while connected.
+    fn connect(&self) -> Result<(ReentrantMutexGuard<'_, ()>, Connection<'_>), GraphError> {
+        let gate = self.gate.lock();
+        Ok((gate, Connection::new(&self.db)?))
+    }
+
+    /// Copies the database and its change log into a new folder beside them.
+    fn back_up(path: &Path) -> std::io::Result<std::path::PathBuf> {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let stamp = chrono::Local::now().format("%Y-%m-%d-%H%M%S");
+        let dir = path.with_file_name(format!("{name}.damaged-{stamp}"));
+        std::fs::create_dir(&dir)?;
+        for file in [name.to_string(), format!("{name}.wal")] {
+            let from = path.with_file_name(&file);
+            if from.exists() {
+                std::fs::copy(&from, dir.join(&file))?;
+            }
+        }
+        Ok(dir)
     }
 
     #[cfg(test)]
@@ -447,7 +521,7 @@ impl Graph {
                 conn.query(ddl)?;
             }
         }
-        let graph = Self { db };
+        let graph = Self { db, gate: ReentrantMutex::new(()) };
         graph.migrate_aliased_kinds()?;
         graph.migrate_info_columns()?;
         graph.migrate_project_statuses()?;
@@ -456,7 +530,7 @@ impl Graph {
 
     /// Moves details that became columns out of the `info` JSON of rows saved before.
     fn migrate_info_columns(&self) -> Result<(), GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let rows: Vec<(String, String)> = conn
             .query("MATCH (e:Entity) RETURN e.id, e.info")?
             .map(|row| (string(&row[0]), string(&row[1])))
@@ -505,7 +579,7 @@ impl Graph {
     /// with the role. Ids are kept, so links, messages and vault files still find them.
     fn migrate_aliased_kinds(&self) -> Result<(), GraphError> {
         for (alias, kind, role) in KIND_ALIASES {
-            let conn = Connection::new(&self.db)?;
+            let (_gate, conn) = self.connect()?;
             let mut stmt = conn.prepare("MATCH (e:Entity) WHERE e.kind = $alias RETURN e.id")?;
             let ids: Vec<String> =
                 conn.execute(&mut stmt, vec![("alias", (*alias).into())])?.map(|row| string(&row[0])).collect();
@@ -545,7 +619,7 @@ impl Graph {
     fn create_entity(&self, kind: &str, name: &str) -> Result<Entity, GraphError> {
         let id = entity_id(kind, &name);
 
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(
             &format!(
             "MERGE (e:Entity {{id: $id}}) \
@@ -574,7 +648,7 @@ impl Graph {
             return Err(GraphError::UnknownRelationKind(kind.into()));
         }
 
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(
             "MATCH (a:Entity {id: $from}), (b:Entity {id: $to}) \
              MERGE (a)-[r:Link {kind: $kind}]->(b) \
@@ -596,6 +670,25 @@ impl Graph {
         }
     }
 
+    /// Time blocks starting on `day` (YYYY-MM-DD), earliest first, each with the tasks it is for.
+    pub fn scheduled_on(&self, day: &str) -> Result<Vec<(Entity, Vec<Entity>)>, GraphError> {
+        let mut events: Vec<Entity> =
+            self.entities_of_kind("Event")?.into_iter().filter(|e| e.info.get("start").is_some_and(|s| s.starts_with(day))).collect();
+        events.sort_by(|a, b| a.info["start"].cmp(&b.info["start"]));
+        events
+            .into_iter()
+            .map(|event| {
+                let tasks = self
+                    .links(&event.id)?
+                    .into_iter()
+                    .filter(|l| l.kind == "SCHEDULED_FOR" && l.outgoing && l.other.kind == "Task")
+                    .map(|l| l.other)
+                    .collect();
+                Ok((event, tasks))
+            })
+            .collect()
+    }
+
     /// Entities of a kind, by name; an alias kind ("Student") lists entities with its role.
     pub fn entities_of_kind(&self, kind: &str) -> Result<Vec<Entity>, GraphError> {
         let (kind, role) = resolve_kind(kind).ok_or_else(|| GraphError::UnknownEntityKind(kind.into()))?;
@@ -608,7 +701,7 @@ impl Graph {
                 .collect());
         }
 
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(
             &format!("MATCH (e:Entity) WHERE e.kind = $kind RETURN {} ORDER BY lower(e.name)", fields("e")),
         )?;
@@ -617,7 +710,7 @@ impl Graph {
     }
 
     pub fn get(&self, id: &str) -> Result<Option<Entity>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt =
             conn.prepare(&format!("MATCH (e:Entity {{id: $id}}) RETURN {}", fields("e")))?;
         let mut rows = conn.execute(&mut stmt, vec![("id", id.into())])?;
@@ -676,7 +769,7 @@ impl Graph {
             Some((date, time)) => (date.to_string(), time.to_string()),
             None => (due, String::new()),
         };
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(
             "MATCH (e:Entity {id: $id}) SET \
                e.info = $info, e.updated_at = $now, \
@@ -735,7 +828,7 @@ impl Graph {
         };
         // Sorted on plain text and number keys: ordering on NULLs and booleans came out
         // inconsistently between runs.
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(&format!(
             "{pattern} WHERE {} \
              WITH DISTINCT e \
@@ -780,7 +873,7 @@ impl Graph {
         }
         let json = serde_json::to_string(&clean).map_err(|e| GraphError::InvalidInfo(e.to_string()))?;
         let now = now_ms();
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt =
             conn.prepare("MATCH (e:Entity {id: $id}) SET e.tags = $tags, e.updated_at = $now")?;
         conn.execute(
@@ -798,7 +891,7 @@ impl Graph {
             return Err(GraphError::InvalidInfo("notes are too long".into()));
         }
         let now = now_ms();
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt =
             conn.prepare("MATCH (e:Entity {id: $id}) SET e.notes = $notes, e.updated_at = $now")?;
         conn.execute(
@@ -813,7 +906,7 @@ impl Graph {
     /// Makes the page's LINKS_TO relationships match the [[wikilinks]] in its notes. Links to
     /// names that don't exist yet are skipped; they appear once that page is created.
     pub fn sync_wikilinks(&self, id: &str, names: &[String]) -> Result<(), GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(
             "MATCH (a:Entity {id: $id})-[r:Link {kind: 'LINKS_TO'}]->(:Entity) DELETE r",
         )?;
@@ -840,7 +933,7 @@ impl Graph {
 
     /// Every entity, by name.
     pub fn all_entities(&self) -> Result<Vec<Entity>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let rows = conn.query(&format!(
             "MATCH (e:Entity) RETURN {} ORDER BY lower(e.name)",
             fields("e")
@@ -850,7 +943,7 @@ impl Graph {
 
     /// Entities created at or after `ms` (milliseconds since the epoch), oldest first.
     pub fn created_since(&self, ms: i64) -> Result<Vec<Entity>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(&format!(
             "MATCH (e:Entity) WHERE e.created_at >= $since RETURN {} ORDER BY e.created_at",
             fields("e")
@@ -874,7 +967,7 @@ impl Graph {
             text: text.into(),
             focus: focus.map(String::from),
         };
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(
             "CREATE (:Message {id: $id, at: $at, role: $role, text: $text, focus: $focus})",
         )?;
@@ -902,7 +995,7 @@ impl Graph {
 
     /// The latest messages of the main chat (not sent from a page), oldest first.
     pub fn recent_messages(&self, limit: usize) -> Result<Vec<ChatRecord>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let rows = conn.query(&format!(
             "MATCH (m:Message) WHERE m.focus = '' \
              RETURN m.id, m.at, m.role, m.text, m.focus ORDER BY m.at DESC LIMIT {limit}"
@@ -914,7 +1007,7 @@ impl Graph {
 
     /// The latest messages about an entity, from any chat, oldest first.
     pub fn messages_about(&self, id: &str, limit: usize) -> Result<Vec<ChatRecord>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(&format!(
             "MATCH (m:Message)-[:Mentions]->(e:Entity {{id: $id}}) \
              RETURN m.id, m.at, m.role, m.text, m.focus ORDER BY m.at DESC LIMIT {limit}"
@@ -927,7 +1020,7 @@ impl Graph {
 
     /// Stores an activity unless one with its id exists; returns whether it was new.
     pub fn add_activity(&self, activity: &Activity) -> Result<bool, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare("MATCH (a:Activity {id: $id}) RETURN count(a)")?;
         let exists = matches!(conn.execute(&mut stmt, vec![("id", activity.id.clone().into())])?.next().as_deref(), Some([Value::Int64(n), ..]) if *n > 0);
         if exists {
@@ -980,7 +1073,7 @@ impl Graph {
             conditions.push("a.baseline = false AND a.relevance = ''".into());
         }
         let limit = if query.limit == 0 { 200 } else { query.limit };
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(&format!(
             "MATCH (a:Activity) WHERE {} RETURN a.id, a.person, a.source, a.kind, a.title, a.url, a.summary, a.published, \
              a.found_at, a.baseline, a.relevance, a.reason, a.related, a.seen, a.notified \
@@ -1019,7 +1112,7 @@ impl Graph {
         if !["high", "medium", "low", "none"].contains(&relevance) {
             return Err(GraphError::InvalidInfo(format!("relevance {relevance} must be high, medium, low or none")));
         }
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare("MATCH (a:Activity {id: $id}) SET a.relevance = $relevance, a.reason = $reason, a.related = $related RETURN a.id")?;
         let mut rows = conn.execute(
             &mut stmt,
@@ -1035,7 +1128,7 @@ impl Graph {
 
     /// Marks activities seen: these ids, or all of them.
     pub fn mark_activities_seen(&self, ids: Option<&[String]>) -> Result<(), GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         match ids {
             Some(ids) => {
                 let mut stmt = conn.prepare("MATCH (a:Activity {id: $id}) SET a.seen = true")?;
@@ -1051,7 +1144,7 @@ impl Graph {
     }
 
     pub fn mark_activity_notified(&self, id: &str) -> Result<(), GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare("MATCH (a:Activity {id: $id}) SET a.notified = true")?;
         conn.execute(&mut stmt, vec![("id", id.into())])?;
         Ok(())
@@ -1059,7 +1152,7 @@ impl Graph {
 
     /// What a watched source held when last checked, and when; None if never checked.
     pub fn source_state(&self, key: &str) -> Result<Option<(String, i64)>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare("MATCH (s:SourceState {key: $key}) RETURN s.value, s.checked_at")?;
         let mut rows = conn.execute(&mut stmt, vec![("key", key.into())])?;
         Ok(rows.next().map(|row| (string(&row[0]), match row[1] { Value::Int64(n) => n, _ => 0 })))
@@ -1067,7 +1160,7 @@ impl Graph {
 
     /// Remembers what a source held when it was checked at `checked_at`.
     pub fn set_source_state(&self, key: &str, value: &str, checked_at: i64) -> Result<(), GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare("MERGE (s:SourceState {key: $key}) SET s.value = $value, s.checked_at = $now")?;
         conn.execute(&mut stmt, vec![("key", key.into()), ("value", value.into()), ("now", checked_at.into())])?;
         Ok(())
@@ -1075,7 +1168,7 @@ impl Graph {
 
     /// Remembers a decision made in Tidy up, so it isn't asked about again.
     pub fn decide(&self, key: &str) -> Result<(), GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare("MERGE (d:Decision {key: $key})")?;
         conn.execute(&mut stmt, vec![("key", key.into())])?;
         Ok(())
@@ -1083,13 +1176,13 @@ impl Graph {
 
     /// The decisions made in Tidy up.
     pub fn decisions(&self) -> Result<Vec<String>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         Ok(conn.query("MATCH (d:Decision) RETURN d.key")?.map(|row| string(&row[0])).collect())
     }
 
     /// Each relationship kind in use, with how many there are.
     pub fn relation_counts(&self) -> Result<Vec<(String, usize)>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         Ok(conn
             .query("MATCH ()-[r:Link]->() RETURN r.kind, count(*) ORDER BY count(*) DESC")?
             .map(|row| (string(&row[0]), match row[1] { Value::Int64(n) => n as usize, _ => 0 }))
@@ -1098,7 +1191,7 @@ impl Graph {
 
     /// Each kind of page in use, with how many there are.
     pub fn kind_counts(&self) -> Result<Vec<(String, usize)>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         Ok(conn
             .query("MATCH (e:Entity) RETURN e.kind, count(*) ORDER BY count(*) DESC")?
             .map(|row| (string(&row[0]), match row[1] { Value::Int64(n) => n as usize, _ => 0 }))
@@ -1107,7 +1200,7 @@ impl Graph {
 
     /// A few pairs joined by a relationship kind, as (from name, to name).
     pub fn links_of_kind(&self, kind: &str, limit: usize) -> Result<Vec<(String, String)>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(&format!(
             "MATCH (a:Entity)-[r:Link {{kind: $kind}}]->(b:Entity) RETURN a.name, b.name ORDER BY r.created_at LIMIT {limit}"
         ))?;
@@ -1120,7 +1213,7 @@ impl Graph {
         if !RELATION_KINDS.contains(&new) && !is_relation_name(new) {
             return Err(GraphError::UnknownRelationKind(new.into()));
         }
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare("MATCH (a:Entity)-[r:Link {kind: $kind}]->(b:Entity) RETURN a.id, b.id, r.detail, r.since, r.until")?;
         let pairs: Vec<(String, String, LinkDetails)> = conn
             .execute(&mut stmt, vec![("kind", old.into())])?
@@ -1141,7 +1234,7 @@ impl Graph {
 
     /// Removes every relationship of a kind; the pages stay. Returns how many went.
     pub fn remove_relation(&self, kind: &str) -> Result<usize, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare("MATCH (a:Entity)-[r:Link {kind: $kind}]->(b:Entity) RETURN a.id, b.id")?;
         let pairs: Vec<(String, String)> = conn.execute(&mut stmt, vec![("kind", kind.into())])?.map(|row| (string(&row[0]), string(&row[1]))).collect();
         for (from, to) in &pairs {
@@ -1203,7 +1296,7 @@ impl Graph {
 
     /// All sections, pinned or dismissed, in sidebar order.
     pub fn sections(&self) -> Result<Vec<Section>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let rows = conn.query("MATCH (s:Section) RETURN s.tag, s.title, s.pinned, s.icon ORDER BY s.position")?;
         Ok(rows
             .map(|row| Section {
@@ -1219,7 +1312,7 @@ impl Graph {
     pub fn set_section_icon(&self, tag: &str, icon: Option<&str>) -> Result<(), GraphError> {
         let tag = normalize_tag(tag).ok_or(GraphError::EmptyName)?;
         let icon = icon.map(check_icon).transpose()?.unwrap_or_default();
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare("MATCH (s:Section {tag: $tag}) SET s.icon = $icon RETURN s.tag")?;
         let mut rows = conn.execute(&mut stmt, vec![("tag", tag.clone().into()), ("icon", icon.into())])?;
         rows.next().map(|_| ()).ok_or(GraphError::NotFound(tag))
@@ -1246,7 +1339,7 @@ impl Graph {
         if title.is_empty() {
             return Err(GraphError::EmptyName);
         }
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(
             "MERGE (s:Section {tag: $tag}) \
              ON CREATE SET s.position = $position \
@@ -1267,7 +1360,7 @@ impl Graph {
 
     /// The entity with exactly this name (ignoring case and spacing), if any.
     pub fn find_by_name(&self, name: &str) -> Result<Option<Entity>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(
             &format!(
                 "MATCH (e:Entity) WHERE lower(e.name) = $name OR lower(e.aliases) CONTAINS $quoted \
@@ -1300,7 +1393,7 @@ impl Graph {
         }
         let json = serde_json::to_string(&clean).map_err(|e| GraphError::InvalidInfo(e.to_string()))?;
         let now = now_ms();
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare("MATCH (e:Entity {id: $id}) SET e.aliases = $aliases, e.updated_at = $now")?;
         conn.execute(&mut stmt, vec![("id", id.into()), ("aliases", json.into()), ("now", now.into())])?;
         entity.aliases = clean;
@@ -1316,7 +1409,7 @@ impl Graph {
             }
         }
         self.link(from_id, kind, to_id)?;
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(
             "MATCH (a:Entity {id: $from})-[r:Link {kind: $kind}]->(b:Entity {id: $to}) SET \
                r.detail = CASE WHEN $set_detail THEN (CASE WHEN $detail = '' THEN NULL ELSE $detail END) ELSE r.detail END, \
@@ -1364,7 +1457,7 @@ impl Graph {
     /// Everyone linked to an organization or any part of it (its departments and their labs),
     /// found with one recursive query. Past links are left out unless `include_past`.
     pub fn affiliations_at(&self, organization_id: &str, include_past: bool) -> Result<Vec<Affiliation>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(&format!(
             "MATCH (p:Entity)-[a:Link]->(o:Entity)-[:Link*0..{MAX_PART_DEPTH} (r, n | WHERE r.kind = 'PART_OF')]->(top:Entity {{id: $id}}) \
              WHERE a.kind IN ['AFFILIATED_WITH', 'STUDIED_AT'] AND p.kind = 'Person' \
@@ -1421,7 +1514,7 @@ impl Graph {
 
     /// Most recently created entities first.
     pub fn recent_entities(&self, limit: usize) -> Result<Vec<Entity>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let rows = conn.query(&format!(
             "MATCH (e:Entity) RETURN {} ORDER BY e.created_at DESC LIMIT {limit}",
             fields("e")
@@ -1438,7 +1531,7 @@ impl Graph {
         if let Some(other) = self.find_by_name(&name)?.filter(|e| e.id != id) {
             return Err(GraphError::InvalidName(format!("{} already exists", other.name)));
         }
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt =
             conn.prepare("MATCH (e:Entity {id: $id}) SET e.name = $name, e.updated_at = $now")?;
         conn.execute(
@@ -1478,7 +1571,7 @@ impl Graph {
             .filter(|l| !l.outgoing && l.kind == "AFFILIATED_WITH")
             .map(|l| l.other.id)
             .collect();
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare("MATCH (e:Entity {id: $id}) DETACH DELETE e")?;
         conn.execute(&mut stmt, vec![("id", id.into())])?;
         for person in affiliated {
@@ -1488,7 +1581,7 @@ impl Graph {
     }
 
     fn set_kind(&self, id: &str, kind: &str) -> Result<(), GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt =
             conn.prepare("MATCH (e:Entity {id: $id}) SET e.kind = $kind, e.updated_at = $now")?;
         conn.execute(
@@ -1501,7 +1594,7 @@ impl Graph {
     /// Changes whenever an entity or relationship is added, changed or removed:
     /// (entities + relationships, latest change time, a sum over relationship times).
     pub fn fingerprint(&self) -> Result<(usize, i64, usize), GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let int = |v: &Value| match v {
             Value::Int64(n) => *n,
             _ => 0,
@@ -1518,7 +1611,7 @@ impl Graph {
 
     /// Removes a relationship; returns whether one existed.
     pub fn unlink(&self, from_id: &str, kind: &str, to_id: &str) -> Result<bool, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut stmt = conn.prepare(
             "MATCH (a:Entity {id: $from})-[r:Link {kind: $kind}]->(b:Entity {id: $to}) \
              DELETE r RETURN count(*)",
@@ -1536,7 +1629,7 @@ impl Graph {
 
     /// All relationships touching an entity, outgoing first, each group oldest first.
     pub fn links(&self, id: &str) -> Result<Vec<Link>, GraphError> {
-        let conn = Connection::new(&self.db)?;
+        let (_gate, conn) = self.connect()?;
         let mut links = Vec::new();
         for (outgoing, pattern) in [(true, "-[r:Link]->"), (false, "<-[r:Link]-")] {
             let mut stmt = conn.prepare(&format!(
@@ -2494,5 +2587,164 @@ mod tests {
             assert_eq!(g.links("person:rahul").unwrap().len(), 1);
         }
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_damaged_change_log_keeps_what_came_before() {
+        let dir = std::env::temp_dir().join(format!("suk-test-damaged-{}", now_ms()));
+        let crashed = dir.join("crashed");
+        std::fs::create_dir_all(&crashed).unwrap();
+        {
+            let g = Graph::open(dir.join("suk.lbdb")).unwrap();
+            let rahul = g.upsert_entity("Student", "Rahul").unwrap();
+            let project = g.upsert_entity("Project", "LLVM Security").unwrap();
+            g.link(&rahul.id, "WORKS_ON", &project.id).unwrap();
+            // The files as a crash leaves them: changes still in the log, the last one cut short.
+            for file in ["suk.lbdb", "suk.lbdb.wal"] {
+                std::fs::copy(dir.join(file), crashed.join(file)).unwrap();
+            }
+            let mut wal = std::fs::OpenOptions::new().append(true).open(crashed.join("suk.lbdb.wal")).unwrap();
+            std::io::Write::write_all(&mut wal, &[0xAB; 37]).unwrap();
+        }
+        let path = crashed.join("suk.lbdb");
+        assert!(Database::new(&path, SystemConfig::default()).is_err(), "the damage should be detected");
+        let g = Graph::open(&path).unwrap();
+        assert_eq!(g.entities_of_kind("Student").unwrap().len(), 1);
+        assert_eq!(g.links("person:rahul").unwrap().len(), 1);
+        let backups: Vec<_> = std::fs::read_dir(&crashed).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("suk.lbdb.damaged-")).collect();
+        assert_eq!(backups.len(), 1);
+        assert!(backups[0].path().join("suk.lbdb.wal").exists());
+        drop(g);
+        // Recovered once, it opens normally from then on.
+        assert_eq!(Graph::open(&path).unwrap().entities_of_kind("Student").unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Runs `write` in a copy of this test process that then aborts, as a crash or a quit that
+    /// never closes the database does; returns the database's path for the next open.
+    fn after_crash(test: &str, write: impl FnOnce(&Path) -> Graph) -> std::path::PathBuf {
+        if let Ok(path) = std::env::var("SUK_CRASH_DB") {
+            // Still open: closing the database would fold the log in.
+            let _open = write(Path::new(&path));
+            std::process::abort();
+        }
+        let dir = std::env::temp_dir().join(format!("suk-test-crash-{test}-{}", now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("suk.lbdb");
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([&format!("graph::tests::{test}"), "--exact", "--include-ignored"])
+            .env("SUK_CRASH_DB", &path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(!status.success(), "the writer should have crashed");
+        path
+    }
+
+    #[test]
+    fn long_texts_survive_a_crash() {
+        let long = "Program repair, fuzzing and testing. ".repeat(1500);
+        let path = after_crash("long_texts_survive_a_crash", |path| {
+            let g = Graph::open(path).unwrap();
+            let list = g.upsert_entity("Note", "Reading list").unwrap();
+            g.set_notes(&list.id, &long).unwrap();
+            g.set_source_state("homepage:person:x:https://example.org/", &long, 1).unwrap();
+            g.upsert_entity("Note", "Written after").unwrap();
+            g
+        });
+        let g = Graph::open(&path).unwrap();
+        assert_eq!(g.find_by_name("Reading list").unwrap().unwrap().notes, long);
+        assert_eq!(g.source_state("homepage:person:x:https://example.org/").unwrap().unwrap().0, long);
+        assert!(g.find_by_name("Written after").unwrap().is_some());
+        let dir = path.parent().unwrap();
+        assert!(!std::fs::read_dir(dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains("damaged")));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_change_log_from_an_earlier_release_is_kept() {
+        let path = after_crash("a_change_log_from_an_earlier_release_is_kept", |path| {
+            // How releases up to 0.2.0 opened it.
+            let g = Graph::init(Database::new(path, SystemConfig::default()).unwrap()).unwrap();
+            g.upsert_entity("Note", "From 0.2.0").unwrap();
+            g
+        });
+        assert!(Database::new(&path, SystemConfig::default().enable_checksums(false)).is_err(), "the log should need its checksums");
+        {
+            let g = Graph::open(&path).unwrap();
+            assert!(g.find_by_name("From 0.2.0").unwrap().is_some());
+            g.upsert_entity("Note", "From now on").unwrap();
+        }
+        let g = Graph::open(&path).unwrap();
+        assert!(g.find_by_name("From 0.2.0").unwrap().is_some());
+        assert!(g.find_by_name("From now on").unwrap().is_some());
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_checkpoint_empties_the_change_log() {
+        let dir = std::env::temp_dir().join(format!("suk-test-checkpoint-{}", now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("suk.lbdb");
+        let g = Graph::open(&path).unwrap();
+        g.upsert_entity("Note", "Kept").unwrap();
+        g.checkpoint().unwrap();
+        assert_eq!(std::fs::metadata(dir.join("suk.lbdb.wal")).map_or(0, |m| m.len()), 0);
+        drop(g);
+        assert!(Graph::open(&path).unwrap().find_by_name("Kept").unwrap().is_some());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn queries_writes_and_checkpoints_from_many_threads() {
+        let dir = std::env::temp_dir().join(format!("suk-test-gate-{}", now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let g = Graph::open(dir.join("suk.lbdb")).unwrap();
+        let project = g.upsert_entity("Project", "Fuzzing").unwrap();
+        for i in 0..30 {
+            let task = g.upsert_entity("Task", &format!("Task {i}")).unwrap();
+            g.set_notes(&task.id, &"notes ".repeat(50 + i)).unwrap();
+            g.link(&project.id, "HAS_TASK", &task.id).unwrap();
+        }
+        std::thread::scope(|s| {
+            for t in 0..4 {
+                let (g, project) = (&g, &project);
+                s.spawn(move || {
+                    for i in 0..8 {
+                        for e in g.all_entities().unwrap() {
+                            g.links(&e.id).unwrap();
+                        }
+                        let task = g.upsert_entity("Task", &format!("Busy {t} {i}")).unwrap();
+                        g.link(&project.id, "HAS_TASK", &task.id).unwrap();
+                    }
+                });
+            }
+            s.spawn(|| {
+                for _ in 0..8 {
+                    g.checkpoint().unwrap();
+                }
+            });
+        });
+        assert_eq!(g.links(&project.id).unwrap().len(), 30 + 4 * 8);
+        drop(g);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_days_time_blocks_come_with_their_tasks() {
+        let g = Graph::in_memory().unwrap();
+        let review = g.upsert_entity("Task", "Review TSE paper").unwrap();
+        let late = g.upsert_entity("Event", "Review TSE paper (2026-10-01 11:30)").unwrap();
+        g.update_info(&late.id, &BTreeMap::from([("start".into(), Some("2026-10-01T11:30".into())), ("end".into(), Some("2026-10-01T13:00".into()))])).unwrap();
+        g.link(&late.id, "SCHEDULED_FOR", &review.id).unwrap();
+        let early = g.upsert_entity("Event", "Upload BTP marks (2026-10-01 09:30)").unwrap();
+        g.update_info(&early.id, &BTreeMap::from([("start".into(), Some("2026-10-01T09:30".into()))])).unwrap();
+        let other_day = g.upsert_entity("Event", "Seminar").unwrap();
+        g.update_info(&other_day.id, &BTreeMap::from([("start".into(), Some("2026-10-02T17:00".into()))])).unwrap();
+
+        let day = g.scheduled_on("2026-10-01").unwrap();
+        let names: Vec<(&str, Vec<&str>)> = day.iter().map(|(e, t)| (e.name.as_str(), t.iter().map(|t| t.name.as_str()).collect())).collect();
+        assert_eq!(names, vec![("Upload BTP marks (2026-10-01 09:30)", vec![]), ("Review TSE paper (2026-10-01 11:30)", vec!["Review TSE paper"])]);
     }
 }

@@ -60,6 +60,17 @@ fn start_vault_sync(app: AppHandle) {
     });
 }
 
+/// Folds the change log into the database every few minutes, so a crash or a forced quit loses
+/// little even if the log can't be replayed.
+fn start_checkpoints(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(300));
+        if let Err(e) = app.state::<graph::Graph>().checkpoint() {
+            eprintln!("graph: checkpoint failed: {e}");
+        }
+    });
+}
+
 /// Checks people the user follows: shortly after launch, then every minute for sources that
 /// are due (each is read at most every few hours).
 fn start_watching(app: AppHandle) {
@@ -151,6 +162,7 @@ pub fn run() {
             let vault_root = documents.join(FOLDER);
             app.manage(vault::Vault::new(vault_root));
             start_vault_sync(app.handle().clone());
+            start_checkpoints(app.handle().clone());
             app.manage(claude::Claude::default());
             app.manage(codex::Codex::default());
             app.manage(gemini::Gemini::default());
@@ -239,6 +251,7 @@ pub fn run() {
             commands::submit_sign_in_code,
             commands::cancel_sign_in,
             commands::list_entities,
+            commands::scheduled_on,
             commands::get_entity,
             commands::follow_person,
             commands::add_profile_links,
@@ -252,6 +265,34 @@ pub fn run() {
             commands::set_section_icon,
             commands::set_favorite,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // Quitting doesn't close the database, so fold the change log in here.
+            if let tauri::RunEvent::Exit = event {
+                if let Err(e) = app.state::<graph::Graph>().checkpoint() {
+                    eprintln!("graph: checkpoint on exit failed: {e}");
+                }
+            }
+        });
+}
+
+#[cfg(test)]
+mod tests {
+    /// A command the frontend calls but the window isn't granted fails with "not allowed by ACL".
+    #[test]
+    fn every_command_is_declared_and_granted() {
+        let source = include_str!("lib.rs");
+        let handlers = &source[source.find("generate_handler![").unwrap()..];
+        let handlers = &handlers[..handlers.find("])").unwrap()];
+        let commands: Vec<&str> = handlers.lines().filter_map(|l| l.trim().strip_prefix("commands::")).map(|c| c.trim_end_matches(',')).collect();
+        assert!(commands.len() > 50, "found {commands:?}");
+        let manifest = include_str!("../build.rs");
+        let capability = include_str!("../capabilities/default.json");
+        for command in commands {
+            assert!(manifest.contains(&format!("\"{command}\"")), "{command} is missing from build.rs");
+            let grant = format!("\"allow-{}\"", command.replace('_', "-"));
+            assert!(capability.contains(&grant), "{grant} is missing from capabilities/default.json");
+        }
+    }
 }

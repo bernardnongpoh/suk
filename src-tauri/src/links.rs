@@ -56,10 +56,23 @@ pub struct LinkPage {
 
 /// Downloads a page and extracts its text. Blocks; call it off the async runtime.
 pub fn read(url: &str, allow_private: bool) -> Result<LinkPage, String> {
-    let html = fetch(url, allow_private)?;
+    let html = fetch(&readable_url(url), allow_private)?;
+    if html.starts_with("%PDF") {
+        return Err("the link is a PDF, which can't be read; save it with the link as it is".into());
+    }
     let mut page = extract(&html);
     page.url = url.to_string();
     Ok(page)
+}
+
+/// An arXiv paper's PDF link as its abstract page, which has the title, authors and abstract.
+fn readable_url(url: &str) -> String {
+    let Some((start, rest)) = url.split_once("arxiv.org/pdf/") else { return url.to_string() };
+    let id = rest.split(['?', '#']).next().unwrap_or_default().trim_end_matches(".pdf");
+    if id.is_empty() {
+        return url.to_string();
+    }
+    format!("{start}arxiv.org/abs/{id}")
 }
 
 /// Downloads a public link's body as text. Blocks; call it off the async runtime.
@@ -171,14 +184,15 @@ fn push_email(emails: &mut Vec<String>, candidate: &str) {
 }
 
 fn between<'a>(text: &'a str, start: &str, end: &str) -> Option<&'a str> {
-    let lower = text.to_lowercase();
+    let lower = text.to_ascii_lowercase();
     let from = lower.find(start)? + start.len();
     let to = from + lower[from..].find(end)?;
     text.get(from..to)
 }
 
 fn meta_content(head: &str, name: &str) -> Option<String> {
-    let lower = head.to_lowercase();
+    // ASCII only, so offsets in `lower` are offsets in `head`; full lowercasing can change lengths.
+    let lower = head.to_ascii_lowercase();
     let mut offset = 0;
     while let Some(i) = lower[offset..].find("<meta") {
         let start = offset + i;
@@ -190,7 +204,7 @@ fn meta_content(head: &str, name: &str) -> Option<String> {
             let content = tag_lower.find("content=")?;
             let value = &tag[content + 8..];
             let quote = value.chars().next()?;
-            let value = value[1..].split(quote).next()?;
+            let value = value[quote.len_utf8()..].split(quote).next()?;
             let value = decode(value).trim().to_string();
             return (!value.is_empty()).then_some(value);
         }
@@ -210,7 +224,7 @@ fn remove_blocks(html: &str, names: &[&str]) -> String {
     }
     for name in names {
         loop {
-            let lower = out.to_lowercase();
+            let lower = out.to_ascii_lowercase();
             let Some(start) = lower.find(&format!("<{name}")) else { break };
             let close = format!("</{name}>");
             let end = lower[start..].find(&close).map_or(out.len(), |i| start + i + close.len());
@@ -226,7 +240,8 @@ pub fn decode(text: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         rest = &rest[i..];
-        let Some(end) = rest[..rest.len().min(10)].find(';') else {
+        // Bytes, not a string slice: a cut at 10 bytes can land inside a character.
+        let Some(end) = rest.bytes().take(10).position(|b| b == b';') else {
             out.push('&');
             rest = &rest[1..];
             continue;
@@ -302,5 +317,26 @@ mod tests {
             "Home\nSatya Prakash Das\nPhD Scholar, Department of CSE\nIIT Guwahati\nEmail: satya.das [at] example [dot] edu\nMail\nFuzzing\nCompilers — LLVM"
         );
         assert!(!page.text.contains("fake@spam.com") && !page.text.contains("color"));
+    }
+
+    #[test]
+    fn reads_pages_with_non_ascii_text() {
+        // An "&" near multi-byte characters, and letters whose lowercase is a different length.
+        assert_eq!(decode("R&D — über &amp; ünï"), "R&D — über & ünï");
+        let html = "<html><head><title>İstanbul</title><meta name=\"description\" content=\"İİİ Kelvin K lab\">\
+            <meta property=\"og:description\" content=“curly”></head>\
+            <body><p>R&D — über</p><SCRIPT>İİİ</SCRIPT><p>İlker (at) örnek.edu</p></body></html>";
+        let page = extract(html);
+        assert_eq!(page.title.as_deref(), Some("İstanbul"));
+        assert_eq!(page.description.as_deref(), Some("İİİ Kelvin K lab"));
+        assert_eq!(page.text, "R&D — über\nİlker (at) örnek.edu");
+        assert!(extract("<head><meta name=\"description\" content=“curly”></head>").description.is_some());
+    }
+
+    #[test]
+    fn arxiv_pdf_links_are_read_from_the_abstract_page() {
+        assert_eq!(readable_url("https://arxiv.org/pdf/2607.03963v1"), "https://arxiv.org/abs/2607.03963v1");
+        assert_eq!(readable_url("http://arxiv.org/pdf/2607.03963.pdf?x=1"), "http://arxiv.org/abs/2607.03963");
+        assert_eq!(readable_url("https://www.iitg.ac.in/cse/faculty"), "https://www.iitg.ac.in/cse/faculty");
     }
 }

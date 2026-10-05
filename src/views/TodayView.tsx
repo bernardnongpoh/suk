@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { listEntities, listTasks, listUpdates, openPage, submitDetails, type Entity, type TaskItem, type Update } from "../api";
+import { listTasks, listUpdates, openPage, scheduledOn, setTaskDone, submitDetails, type Scheduled, type TaskItem, type Update } from "../api";
 import { timeOf, todayKey } from "../format";
 import CalendarAsk from "../tasks/CalendarAsk";
 import TaskList from "../tasks/TaskList";
@@ -56,7 +56,7 @@ function TodayView({ version, onPlan, onUpdates, onChanged, onOpen, onSettings }
   const [draft, setDraft] = useState("");
   const [when, setWhen] = useState<(typeof WHEN)[number]["label"]>("Today");
   const [adding, setAdding] = useState(false);
-  const [events, setEvents] = useState<Entity[]>([]);
+  const [events, setEvents] = useState<Scheduled[]>([]);
   const [updates, setUpdates] = useState<Update[]>([]);
   const [counts, setCounts] = useState<{ open: number; overdue: number } | null>(null);
   const [tab, setTab] = useState<Tab>("today");
@@ -67,15 +67,7 @@ function TodayView({ version, onPlan, onUpdates, onChanged, onOpen, onSettings }
   const today = todayKey();
 
   useEffect(() => {
-    listEntities("Event").then(
-      (events) =>
-        setEvents(
-          events
-            .filter((e) => e.info.start?.startsWith(today))
-            .sort((a, b) => a.info.start.localeCompare(b.info.start)),
-        ),
-      (err) => setError(String(err)),
-    );
+    scheduledOn(today).then(setEvents, (err) => setError(String(err)));
     listUpdates(null, false).then((all) => setUpdates(all.filter((u) => !u.activity.seen)), () => {});
     listTasks("open", undefined, "mine").then(setMine, () => {});
     listTasks("open", undefined, "others").then(setOthers, () => {});
@@ -85,6 +77,22 @@ function TodayView({ version, onPlan, onUpdates, onChanged, onOpen, onSettings }
   const filter = useMemo(() => keeps(tab, today), [tab, today]);
 
   const count = (id: Tab) => (id === "others" ? others.length : mine.filter(keeps(id, today)).length);
+
+  /** Ticks off (or reopens) the tasks a time block is for. */
+  async function toggleBlock(block: Scheduled) {
+    const done = !block.tasks.every((t) => t.info.status === "done");
+    const status = done ? "done" : "open";
+    const mark = (b: Scheduled): Scheduled =>
+      b.event.id === block.event.id ? { ...b, tasks: b.tasks.map((t) => ({ ...t, info: { ...t.info, status } })) } : b;
+    setEvents((all) => all.map(mark));
+    try {
+      for (const task of block.tasks) await setTaskDone(task.id, done);
+      onChanged();
+    } catch (err) {
+      setError(String(err));
+      scheduledOn(today).then(setEvents, () => {});
+    }
+  }
 
   async function addTask() {
     const name = draft.trim();
@@ -189,15 +197,34 @@ function TodayView({ version, onPlan, onUpdates, onChanged, onOpen, onSettings }
         <>
           <h2 className="section-title">Scheduled</h2>
           <ul className="list">
-            {events.map((e) => (
-              <li key={e.id} className="row">
-                <span className="row-time">
-                  {timeOf(e.info.start)}–{e.info.end ? timeOf(e.info.end) : ""}
-                </span>
-                <span className="row-main">{e.info.title ?? e.name}</span>
-                {e.info.calendar === "added" && <span className="row-meta">In calendar</span>}
-              </li>
-            ))}
+            {events.map((block) => {
+              const e = block.event;
+              const done = block.tasks.length > 0 && block.tasks.every((t) => t.info.status === "done");
+              const title = e.info.title ?? e.name;
+              return (
+                <li key={e.id} className={`row scheduled${done ? " done" : ""}`}>
+                  {block.tasks.length > 0 ? (
+                    <button
+                      className="task-check"
+                      role="checkbox"
+                      aria-checked={done}
+                      aria-label={done ? `Reopen ${title}` : `Mark ${title} done`}
+                      title={block.tasks.map((t) => t.name).join(", ")}
+                      onClick={() => toggleBlock(block)}
+                    >
+                      <Icon name="check" size={12} />
+                    </button>
+                  ) : (
+                    <span className="task-check-space" aria-hidden="true" />
+                  )}
+                  <span className="row-time">
+                    {timeOf(e.info.start)}–{e.info.end ? timeOf(e.info.end) : ""}
+                  </span>
+                  <span className="row-main">{title}</span>
+                  {e.info.calendar === "added" && <span className="row-meta">In calendar</span>}
+                </li>
+              );
+            })}
           </ul>
         </>
       )}

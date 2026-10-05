@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-scheduled-on"
+description = "Enables the scheduled_on command without any pre-configured scope."
+commands.allow = ["scheduled_on"]
+
+[[permission]]
+identifier = "deny-scheduled-on"
+description = "Denies the scheduled_on command without any pre-configured scope."
+commands.deny = ["scheduled_on"]

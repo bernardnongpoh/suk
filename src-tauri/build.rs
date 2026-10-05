@@ -60,6 +60,7 @@ fn main() {
             "submit_sign_in_code",
             "cancel_sign_in",
             "list_entities",
+            "scheduled_on",
             "get_entity",
             "follow_person",
             "add_profile_links",

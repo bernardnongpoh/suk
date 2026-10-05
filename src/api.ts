@@ -322,6 +322,15 @@ export const openPageFile = (id: string | null) => invoke<void>("open_page_file"
 export const listEntities = (kind: EntityKind) =>
   invoke<Entity[]>("list_entities", { kind });
 
+/** A time block on the calendar, with the tasks it is for. */
+export interface Scheduled {
+  event: Entity;
+  tasks: Entity[];
+}
+
+/** The day's time blocks (YYYY-MM-DD), earliest first. */
+export const scheduledOn = (day: string) => invoke<Scheduled[]>("scheduled_on", { day });
+
 export const getEntity = (id: string) => invoke<EntityDetail>("get_entity", { id });
 
 /** A starter setup: the sections it adds and what the assistant is told about your work. */

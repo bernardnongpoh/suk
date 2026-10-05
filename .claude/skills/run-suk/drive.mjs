@@ -98,6 +98,9 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
     put("Task", "Submit grant proposal", { info: { due: addDays(8), status: "waiting", area: "research" } });
     put("Task", "Sign travel form", { info: { due: addDays(-2), area: "admin" } });
     put("Task", "Read PLDI papers", { info: { area: "research" } });
+    // A block from "Plan my day" for a task with no due date: Today ticks the task off from it.
+    put("Event", "Read PLDI papers (" + today + " 14:00)", { info: { start: today + "T14:00", end: today + "T15:30", title: "Read PLDI papers" } });
+    db.links.push({ from: "event:read pldi papers (" + today + " 14:00)", kind: "SCHEDULED_FOR", to: "task:read pldi papers" });
     put("Task", "Old task", { info: { status: "done" } });
     put("Task", "Present state of the art on Solidity Compiler Fuzzing", { info: { due: addDays(7), area: "research", status: "open" } });
     db.links.push({ from: "person:satya", kind: "WORKS_ON", to: "project:fuzzing" });
@@ -418,6 +421,10 @@ await send("Page.addScriptToEvaluateOnNewDocument", {
             return null;
           case "set_task_done": db.entities[args.id].info.status = args.done ? "done" : "open"; return db.entities[args.id];
           case "list_entities": return Object.values(db.entities).filter((e) => e.kind === args.kind);
+          case "scheduled_on": return Object.values(db.entities)
+            .filter((e) => e.kind === "Event" && (e.info.start ?? "").startsWith(args.day))
+            .sort((a, b) => a.info.start.localeCompare(b.info.start))
+            .map((event) => ({ event, tasks: db.links.filter((l) => l.from === event.id && l.kind === "SCHEDULED_FOR").map((l) => db.entities[l.to]) }));
           case "google_status": return {
             client_set: db.google.clientSet,
             connected: db.google.connected,
@@ -693,8 +700,27 @@ results.today = await evaluate(`({
 })`);
 await shot("12-today");
 
+// A time block from "Plan my day" ticks off its task, clicked as a mouse does (nothing on top).
+const blockBox = await evaluate(`(() => {
+  const row = [...document.querySelectorAll('.row.scheduled')].find(r => r.textContent.includes('Read PLDI'));
+  const b = row?.querySelector('.task-check'); if (!b) return null;
+  const r = b.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  return { x, y, onTop: b.contains(document.elementFromPoint(x, y)) };
+})()`);
+if (blockBox)
+  for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
+    await send("Input.dispatchMouseEvent", { type, x: blockBox.x, y: blockBox.y, button: "left", clickCount: 1 });
+await sleep(400);
+results.scheduledTick = await evaluate(`({
+  onTop: ${JSON.stringify(blockBox?.onTop ?? null)},
+  row: [...document.querySelectorAll('.row.scheduled')].find(r => r.textContent.includes('Read PLDI'))?.className,
+  checked: [...document.querySelectorAll('.row.scheduled')].find(r => r.textContent.includes('Read PLDI'))?.querySelector('.task-check')?.getAttribute('aria-checked'),
+  saved: window.__invokes.filter(i => i.cmd === 'set_task_done').map(i => i.args),
+})`);
+await shot("12b-scheduled-ticked");
+
 // Tick a task off: crossed out, saved, still visible until the list reloads.
-await click(".task-check", "");
+await click(".task .task-check", "");
 await evaluate("[...document.querySelectorAll('.task')].find(t => t.textContent.includes('Review Satya')).querySelector('.task-check').click()");
 await sleep(300);
 results.ticked = await evaluate(`({
